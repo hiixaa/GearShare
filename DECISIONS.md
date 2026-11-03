@@ -91,3 +91,20 @@ Each entry: the problem, the options, what was chosen and why.
 - **Chosen:** Option 2.
 - **Why:** the logging code is written once, and the business methods stay about business rules. "Only on success" comes for free: if the method raises, the line after the call is never reached.
 - **Time stamp:** the audit entry uses `datetime.now()`, not the `today` parameter. `today` is the *business* date that the rules are calculated from (and can be faked with `TODAY=`), while the audit log answers "when did a staff member actually do this?". Keeping the two separate means a test run with `TODAY=2026-11-03` still records when it really happened.
+
+---
+
+## Phase 2: DSA
+
+### D9. Indexes for the hot paths, measured before and after
+
+- **Problem:** the 2.1 benchmark showed that `rent` and `return_item` slow down linearly as the shop grows (`rent`: 0.26 ms at 1k → 4.8 ms at 50k), even though they should only touch one customer and one item.
+- **Cause:** `unpaid_fines()` (R4 check) scanned every rental and fine; `get_open_rental()` scanned the rentals list; `iter_overdue()` scanned returned rentals that can never be overdue.
+- **Options:**
+  1. Leave it: 5 ms is still fast.
+  2. Replace the `rentals` list with a dict.
+  3. Keep the list as the history, and add **indexes**: `open_rentals` (ID → rental), `rentals_by_customer` (ID → list), `fines_by_rental` (rental ID → list).
+- **Chosen:** Option 3.
+- **Why:** option 1 hides a cost that grows with every rental ever made, so the shop gets slower every day, forever. Option 2 fixes lookup by ID but not "all rentals of one customer". The indexes are dicts pointing at the *same* objects (no copies), so the extra memory is one reference per rental. Every rental and fine is added through `_add_rental()` / `_add_fine()`, so the list and the indexes cannot disagree.
+- **Result:** `rent` 4.8 ms → 0.01 ms and `return_item` 1.3 ms → 0.004 ms at 50k, both now flat. All Phase 1 tests are unchanged and still pass. Full numbers are in `docs/benchmark_report.md`.
+- **Cost:** three more structures to keep in sync. Phase 3 moves this job to database indexes.

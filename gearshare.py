@@ -73,6 +73,11 @@ class GearShare:
         # list: rentals are only ever appended and read in order (RN001, RN002, ...).
         self.rentals = []
         self.fines = []
+        # Indexes (Phase 2, see D9): extra dicts pointing at the same objects,
+        # so the hot paths do not have to scan the whole history.
+        self.open_rentals = {}           # rental ID -> open Rental (insertion order kept)
+        self.rentals_by_customer = {}    # customer ID -> [Rental, ...]
+        self.fines_by_rental = {}        # rental ID -> [Fine, ...]
         # customer ID -> set of SKUs they hold right now.
         # set: R8 is an O(1) "sku in held" test, and len(held) is the R3 count.
         self.held_skus = {}
@@ -127,26 +132,39 @@ class GearShare:
             customer = customer_class(row["customer_id"], row["name"], row["email"])
             self.customers[customer.customer_id] = customer
             self.held_skus[customer.customer_id] = set()
+            self.rentals_by_customer[customer.customer_id] = []
 
     def _load_rentals(self, path):
         for row in self._read_csv(path):
-            rental = Rental(
+            self._add_rental(Rental(
                 rental_id=row["rental_id"],
                 customer=self.customers[row["customer_id"]],
                 item=self.items[row["sku"]],
                 issue_date=parse_date(row["issue_date"]),
                 due_date=parse_date(row["due_date"]),
                 return_date=parse_date(row["return_date"]),
-            )
-            self.rentals.append(rental)
-            if rental.is_open():  # rebuild availability from unreturned rentals
-                rental.item.check_out_unit()
-                self.held_skus[rental.customer.customer_id].add(rental.item.sku)
+            ))
 
     def _load_fines(self, path):
         for row in self._read_csv(path):
             paid = row["paid"].strip().lower() == "yes"
-            self.fines.append(Fine(row["rental_id"], row["amount"], paid))
+            self._add_fine(Fine(row["rental_id"], row["amount"], paid))
+
+    # ------------------------------------------------------------------ bookkeeping
+    # Every rental and fine goes through these two methods, so the list and
+    # the indexes can never disagree.
+
+    def _add_rental(self, rental):
+        self.rentals.append(rental)
+        self.rentals_by_customer[rental.customer.customer_id].append(rental)
+        if rental.is_open():  # rebuild availability from unreturned rentals
+            self.open_rentals[rental.rental_id] = rental
+            rental.item.check_out_unit()
+            self.held_skus[rental.customer.customer_id].add(rental.item.sku)
+
+    def _add_fine(self, fine):
+        self.fines.append(fine)
+        self.fines_by_rental.setdefault(fine.rental_id, []).append(fine)
 
     # ------------------------------------------------------------------ lookups
 
@@ -166,16 +184,17 @@ class GearShare:
 
     def get_open_rental(self, rental_id):
         rental_id = str(rental_id).strip().upper()
-        for rental in self.rentals:
-            if rental.rental_id == rental_id and rental.is_open():
-                return rental
-        raise RentalNotFoundError(f"No open rental with ID {rental_id}.")
+        try:
+            return self.open_rentals[rental_id]
+        except KeyError:
+            raise RentalNotFoundError(f"No open rental with ID {rental_id}.") from None
 
     def unpaid_fines(self, customer_id):
-        rental_ids = {r.rental_id for r in self.rentals
-                      if r.customer.customer_id == customer_id}
-        return sum(f.amount for f in self.fines
-                   if not f.paid and f.rental_id in rental_ids)
+        """O(k), k = this customer's rentals, instead of scanning the whole shop."""
+        return sum(fine.amount
+                   for rental in self.rentals_by_customer[customer_id]
+                   for fine in self.fines_by_rental.get(rental.rental_id, [])
+                   if not fine.paid)
 
     def active_count(self, customer_id):
         return len(self.held_skus[customer_id])
@@ -241,9 +260,7 @@ class GearShare:
             issue_date=today,
             due_date=today + timedelta(days=item.rental_days(customer)),
         )
-        self.rentals.append(rental)
-        item.check_out_unit()
-        held.add(item.sku)
+        self._add_rental(rental)  # also takes the unit and records it as held
         return rental
 
     # ------------------------------------------------------------------ return
@@ -255,10 +272,11 @@ class GearShare:
         fee = rental.late_fee(today)
 
         rental.close(today)
+        del self.open_rentals[rental.rental_id]
         rental.item.check_in_unit()
         self.held_skus[rental.customer.customer_id].discard(rental.item.sku)
         if fee > 0:
-            self.fines.append(Fine(rental.rental_id, fee, paid=False))
+            self._add_fine(Fine(rental.rental_id, fee, paid=False))
 
         # R7: the first person waiting is served first.
         next_customer = None
@@ -315,13 +333,13 @@ class GearShare:
     def customer_rentals(self, customer_id):
         """The customer's open rentals, oldest first."""
         customer = self.get_customer(customer_id)
-        return [r for r in self.rentals
-                if r.customer is customer and r.is_open()]
+        return [r for r in self.rentals_by_customer[customer.customer_id]
+                if r.is_open()]
 
     def iter_overdue(self, today):
         """Generator: yield overdue rentals one at a time, without building
-        a list first."""
-        for rental in self.rentals:
+        a list first. Only open rentals can be overdue, so only those are scanned."""
+        for rental in self.open_rentals.values():
             if rental.is_overdue(today):
                 yield rental
 
