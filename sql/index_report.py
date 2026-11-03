@@ -29,7 +29,7 @@ def build_big_db(path, seed=7):
     """Starter data + 1,000 customers + 1,000 items + 100,000 rentals (~1% open)."""
     if path.exists():
         path.unlink()
-    create_database(path, out=lambda *_: None)
+    create_database(path, out=lambda *_: None, with_indexes=False)  # "before" = no indexes
     rng = random.Random(seed)
     conn = sqlite3.connect(path)
     conn.execute("PRAGMA foreign_keys = ON")

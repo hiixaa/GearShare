@@ -16,10 +16,14 @@ from sql.run_sql import DEFAULT_DB, connect, run
 SQL_DIR = Path(__file__).resolve().parent
 
 
-def create_database(db_path, out=print):
-    """Build the schema, load the starter data and add the indexes in db_path."""
-    scripts = [(SQL_DIR / name).read_text(encoding="utf-8")
-               for name in ("schema.sql", "seed.sql", "indexes.sql")]
+def create_database(db_path, out=print, with_indexes=True):
+    """Build the schema, load the starter data and (by default) add the indexes.
+
+    with_indexes=False is for the index report, which must measure the
+    database BEFORE indexes.sql and then add them itself.
+    """
+    names = ["schema.sql", "seed.sql"] + (["indexes.sql"] if with_indexes else [])
+    scripts = [(SQL_DIR / name).read_text(encoding="utf-8") for name in names]
     conn = connect(db_path)
     try:
         for script in scripts:
