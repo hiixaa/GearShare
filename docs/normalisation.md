@@ -2,7 +2,7 @@
 
 ## 1. Start from a mess (Task 3.1)
 
-`python sql/build_flat.py` joins the four starter CSVs into
+`python -m sql.build_flat` joins the four starter CSVs into
 [`data/gearshare_flat.csv`](../data/gearshare_flat.csv): **one row per rental**,
 with everything about the customer, the item and the fine copied into that row.
 It is the shop's paper register, typed up:

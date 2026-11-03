@@ -1,6 +1,6 @@
 """Task 3.1: join the four starter CSVs into ONE flat file, one row per rental.
 
-    python sql/build_flat.py
+    python -m sql.build_flat
 
 Writes data/gearshare_flat.csv. This is the deliberately un-normalised
 "paper register" that the normalisation write-up (docs/normalisation.md)

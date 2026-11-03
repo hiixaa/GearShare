@@ -214,3 +214,53 @@ Each entry: the problem, the options, what was chosen and why.
 - **Chosen:** calculate it (`total_units − COUNT(open rentals)`), with an index on rentals so the count stays fast (Task 3.6).
 - **Two rent requests at the same moment:** with a calculated value, "check availability, then insert the rental" must be one transaction that **locks before reading**. In SQLite that is `BEGIN IMMEDIATE`, which takes the write lock first, so the second request waits, then sees the first rental and gets "No units available". Without the lock, both could read "1 free" and both insert.
 - **When I would denormalise (store it):** when reading availability is measured to be too slow, e.g. 10 million rentals and a catalogue page showing thousands of items. Then I'd store `available_units`, update it **in the same transaction** as every rental insert/return, add `CHECK (available_units BETWEEN 0 AND total_units)`, and keep a scheduled job that recalculates it from rentals and reports any difference.
+
+### D20. Every `ON DELETE`, chosen on purpose
+
+- **Problem:** for each foreign key, what should happen to the child rows when the parent row is deleted? The spec asks in particular: *what should happen to a customer's rentals if the customer is deleted?*
+- **Options for customer → rentals:**
+  1. `CASCADE`: deleting Rohan deletes RN002, RN009, RN010, and through fines, his unpaid ₹600.
+  2. `SET NULL`: keep the rentals but forget who rented them.
+  3. `RESTRICT`: refuse to delete a customer who has any rental history.
+- **Chosen:** `RESTRICT`.
+- **Why:**
+  - With `CASCADE`, deleting one customer silently rewrites the shop's history. Q4 "most rented items" and Q7 "fines per tier per month" would change after the fact, and unpaid fines would simply vanish.
+  - **The accountant** (revenue and fines reports), **the owner** (which gear is popular) and **anyone settling a dispute** ("who had the drone on 24 October?") would all object.
+  - `SET NULL` keeps the numbers but loses accountability, and `customer_id` is `NOT NULL` anyway.
+  - If a customer must leave (for example, a privacy request), the right move is to **anonymise** the customer row (name and email replaced), not to delete history.
+- **All the other choices:**
+
+| Foreign key | ON DELETE | Why |
+|---|---|---|
+| customers.tier → membership_tiers | RESTRICT (+ ON UPDATE CASCADE) | A tier with customers can't vanish; renaming a tier updates its customers. |
+| rentals.customer_id → customers | **RESTRICT** | History must survive (above). |
+| rentals.sku → items | RESTRICT | Same reason: a rented item stays for the records (retire it, don't delete it). |
+| fines.rental_id → rentals | RESTRICT | Money owed must never disappear as a side effect. Undo-of-return deletes the fine **explicitly** first. |
+| items.category_id → categories | RESTRICT | Move the items before deleting their category. |
+| categories.parent_id → categories | RESTRICT | Can't delete Photography while Cameras and Lenses hang under it. |
+| item_tags.sku → items | CASCADE | Tag links mean nothing without the item. |
+| item_tags.tag_id → tags | CASCADE | Deleting a tag removes it from every item. |
+| waiting_list → items / customers | CASCADE | A queue entry is meaningless once its item or customer is gone. |
+| audit_log | no foreign keys | The log must still describe rows that were later deleted (e.g. "RN011 rented, then undone"). |
+
+### D21. SQL `CHECK` passes on NULL: date checks use `IS`, not `=`
+
+- **Problem:** the first version of `schema.sql` had `CHECK (date(due_date) = due_date)`. A test showed that `'2026-13-03'` was **accepted**: `date('2026-13-03')` is `NULL`, `NULL = '2026-13-03'` is `NULL`, and SQL treats a `CHECK` that evaluates to `NULL` as **passed** (only `FALSE` fails).
+- **Options:** add `AND date(x) IS NOT NULL` to every check, or compare with `IS` (`NULL IS 'text'` is false, not NULL).
+- **Chosen:** `CHECK (date(x) IS x)`. It's shorter, and it also rejects impossible dates like `2026-02-30` (which `date()` silently rolls over to `2026-03-02`, so it isn't equal to the input).
+- **Lesson:** every `CHECK` was tested with a bad row. The bug was only found because a test inserted an invalid date and expected an error.
+
+### D22. SQL scripts run as modules (`python -m sql.run_sql`)
+
+- **Problem:** on this laptop, `python sql/run_sql.py sql/schema.sql` fails with `PermissionError: [Errno 13] Permission denied` when reading the `.sql` file.
+- **What was tested:**
+  - The same code started with `python -m sql.run_sql` or `python -c` reads the file fine.
+  - A script reading a `.txt` copy of the same file works.
+  - A script reading a `.sql` copy **outside OneDrive** (in `%TEMP%`) still fails.
+  - So it isn't the code, OneDrive or the file. A security rule on the machine blocks Python processes started as `python <file>.py` from opening `.sql` files.
+- **Options:**
+  1. Rename the files to `.txt`. That breaks the spec's required names (`schema.sql`, `seed.sql`, ...).
+  2. Ask IT for an exception. That's out of our control, and other machines may differ.
+  3. Run the scripts as modules: `sql/` becomes a package (`sql/__init__.py`) and every command is `python -m sql.<script>`.
+- **Chosen:** Option 3. It works here and on any normal machine, and keeps the spec's file names.
+- **Consequence for Part B (3.7):** `python main.py` is started as a script, so it must **not** read `schema.sql` at start-up. The database is created once by a `-m` command, and the engine only opens it.
