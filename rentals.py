@@ -40,6 +40,13 @@ class Rental:
         return rental_id
 
     @classmethod
+    def release_id(cls, rental_id):
+        """Undo of a rent: if this was the last ID handed out, hand it out again,
+        so undo + rent gives RN011 twice instead of leaving a gap."""
+        if int(rental_id[2:]) == cls._next_number - 1:
+            cls._next_number -= 1
+
+    @classmethod
     def reset_counter(cls, existing_ids):
         """After loading, continue numbering after the highest existing ID."""
         numbers = [int(rid[2:]) for rid in existing_ids]

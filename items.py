@@ -207,3 +207,18 @@ ITEM_TYPES = {
     "Accessory": Accessory,
     "Display": DisplayItem,
 }
+
+
+def item_from_row(row):
+    """Build the right GearItem subclass from one gear.csv row (a dict)."""
+    item_class = ITEM_TYPES[row["item_type"]]
+    return item_class(
+        sku=row["sku"],
+        name=row["name"],
+        tags=[t.strip() for t in row["tags"].split(";") if t.strip()],
+        category=row["category"],
+        parent_category=row["parent_category"],
+        weight_g=row["weight_g"],
+        price=row["price"],
+        total_units=row["total_units"],
+    )
