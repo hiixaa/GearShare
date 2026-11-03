@@ -7,11 +7,12 @@ A rental system for **FrameWorks Gear Rental**, built in four phases:
 | 1     | Python + OOP  | Done        |
 | 2     | DSA           | Done        |
 | 3     | SQL           | Done        |
-| 4     | React + API   | —           |
+| 4     | React + API   | Done        |
 
 ## Requirements
 
 - Python 3.12 or newer (developed on 3.14)
+- Node.js 20.19 or newer, for the Phase 4 website (developed on Node 24)
 - Git
 
 ## Setup (from a clean copy)
@@ -110,6 +111,43 @@ Write-ups:
 - [docs/index_report.md](docs/index_report.md): EXPLAIN before/after, and the index not created
 - [docs/query_results.txt](docs/query_results.txt): output of the 12 queries
 
+## Phase 4: the website and the API
+
+Requirements: Python packages from `requirements.txt` (adds `fastapi`,
+`uvicorn`, `httpx`) and **Node.js 20.19+** (developed on Node 24).
+
+**Terminal 1: the API** (http://localhost:8000, interactive docs at `/docs`):
+
+```powershell
+python -m sql.setup_db                                   # once, or to reset the data
+$env:TODAY="2026-11-03"; python -m uvicorn api.main:app --reload --port 8000
+```
+
+**Terminal 2: the website** (http://localhost:5173):
+
+```powershell
+cd web
+npm install                                              # once
+npm run dev
+```
+
+- Open **http://localhost:5173** (not 127.0.0.1: the API's CORS allows only that origin).
+- The API URL comes from `web/.env` (`VITE_API_URL`, default `http://localhost:8000`). See `web/.env.example`.
+- Don't run the console `main.py` at the same time as the API (DECISIONS D26).
+
+Tests:
+
+```powershell
+python -m pytest -q          # engine + database + API
+cd web; npm test             # basket reducer + form validation
+```
+
+Phase 4 documents:
+- [docs/component_tree.md](docs/component_tree.md): component tree, and where each piece of state lives
+- [docs/wireframes.md](docs/wireframes.md): the five screens
+- [docs/behaviour_table.md](docs/behaviour_table.md): the spec's behaviour table, all 16 rows checked in the browser
+- [docs/pytest_phase4.txt](docs/pytest_phase4.txt): 228 passing tests (engine, database and API)
+
 ## Project layout
 
 ```
@@ -124,6 +162,8 @@ dsa/            Phase 2: search, sorting, hashing, history, categories
 benchmarks/     Phase 2: fake-data generator and timing scripts
 storage/        Phase 3: the only code that talks SQL (one class per table group)
 sql/            Phase 3: schema, seed, queries, tx_demo, indexes + scripts that run them
+api/            Phase 4: FastAPI app over GearShare (api/main.py, errors.py, schemas.py)
+web/            Phase 4: Vite + React website (src/pages, components, context, hooks, lib)
 data/           starter CSVs, gearshare_flat.csv, gearshare.db (created, not committed)
 docs/           diagrams, reports, normalisation write-up, test and query output
 tests/          pytest tests
