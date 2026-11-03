@@ -90,3 +90,55 @@ cache.
 design, because it must look at every name and tag. At 50,000 items it takes
 about 28 ms, which a user would notice on every keystroke on the website.
 Task 2.3's word-to-SKU index (stretch) is the fix.
+
+---
+
+## 2. Searching and sorting (Task 2.2)
+
+Reproduce: `python benchmarks/benchmark_sorts.py` (about 1 minute).
+Searches use the worst case (the target is the last element) and are the
+median of 101 runs. Sorts sort the item names in file order and are the median of 3 runs.
+
+| n | linear_ms | binary_ms | sorted_key_ms | insertion_ms | selection_ms | bubble_ms |
+|---|---|---|---|---|---|---|
+| 1,000 | 0.039 | 0.001 | 0.159 | 33.568 | 41.035 | 60.632 |
+| 5,000 | 0.234 | 0.002 | 1.325 | 762.705 | 1,035.296 | 1,696.167 |
+| 10,000 | 0.377 | 0.002 | 1.926 | 3,065.617 | 4,224.761 | 6,855.747 |
+
+### 2.1 The shape: which column does what when n doubles (5k → 10k)
+
+| Column | 5k → 10k | Big-O | Why |
+|---|---|---|---|
+| `binary_ms` | 0.002 → 0.002 (barely moves) | O(log n) | Doubling n adds just **one** more halving step (≈ 13 → 14 comparisons). |
+| `linear_ms` | 0.23 → 0.38 (≈ 2×) | O(n) | Twice as many elements to look at in the worst case. |
+| `sorted_key_ms` | 1.3 → 1.9 (≈ 2×) | O(n log n) | Python's Timsort, written in C, plus one `key()` call per element. |
+| `insertion_ms` | 763 → 3,066 (**4.0×**) | O(n²) | Each new element is shifted past about half of those before it: n²/4 moves. |
+| `selection_ms` | 1,035 → 4,225 (**4.1×**) | O(n²) | Always n²/2 comparisons, whatever the input. |
+| `bubble_ms` | 1,696 → 6,856 (**4.0×**) | O(n²) | n²/2 comparisons *and* a swap for each out-of-order pair. |
+
+**Surprise 1: all three hand sorts are O(n²), but bubble is about 2× slower than insertion.**
+Big-O hides the constant. Bubble does a full three-step swap for every
+out-of-order neighbour, while insertion does a single shift and stops early
+once the element is in place. The ranking (insertion < selection < bubble) held
+at every size.
+
+**Surprise 2: `sorted()` is about 1,600× faster than insertion sort at 10k.**
+Part of that is O(n log n) vs O(n²) (≈ 13 vs 10,000 steps per element at 10k),
+and part is that Timsort runs in C, while our loops run in the Python
+interpreter. The algorithm explains why the gap *grows*; C explains why it was
+already large at n = 1,000.
+
+### 2.2 Is sorting first worth it for binary search? (think-about question 1)
+
+At 10k: sorting once costs ≈ 1.9 ms. Each binary search saves
+0.377 − 0.002 ≈ 0.375 ms compared with a linear search. Break-even:
+1.9 / 0.375 ≈ **5 searches**. For a single search, linear wins. From about
+the 6th search on the same (unchanged) list, sorting first pays off, and the
+shop's catalogue is searched thousands of times between changes.
+
+### 2.3 Catalogue sort
+
+Top-level category A-Z, then weight heaviest first, then name A-Z, in one
+`sorted()` call with the key `(top_category, -weight_g, name)`. Negating the
+weight turns "descending" into "ascending", so one key does all three parts.
+See DECISIONS D10.

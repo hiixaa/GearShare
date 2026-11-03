@@ -108,3 +108,20 @@ Each entry: the problem, the options, what was chosen and why.
 - **Why:** option 1 hides a cost that grows with every rental ever made, so the shop gets slower every day, forever. Option 2 fixes lookup by ID but not "all rentals of one customer". The indexes are dicts pointing at the *same* objects (no copies), so the extra memory is one reference per rental. Every rental and fine is added through `_add_rental()` / `_add_fine()`, so the list and the indexes cannot disagree.
 - **Result:** `rent` 4.8 ms → 0.01 ms and `return_item` 1.3 ms → 0.004 ms at 50k, both now flat. All Phase 1 tests are unchanged and still pass. Full numbers are in `docs/benchmark_report.md`.
 - **Cost:** three more structures to keep in sync. Phase 3 moves this job to database indexes.
+
+### D10. Catalogue sort with mixed directions
+
+- **Problem:** the website's catalogue order is category **ascending**, weight **descending**, name **ascending**. A single `reverse=True` can't flip just one part.
+- **Options:**
+  1. Two (or three) passes: sort by name, then weight descending, then category, relying on Python's sort being **stable** (equal keys keep their earlier order).
+  2. One pass with a tuple key, negating the number that sorts descending: `(top_category, -weight_g, name)`.
+  3. `functools.cmp_to_key` with a hand-written compare function.
+- **Chosen:** Option 2.
+- **Why:** it is a single O(n log n) sort, and the key reads exactly like the requirement. Option 1 is the right tool when the descending part is **text** (you can't negate a string). Option 3 calls a Python function for every comparison (≈ n log n calls instead of n key calls), which makes it the slowest and the hardest to read.
+- **Detail:** "category" means the **top-level** category (`GearItem.top_category`: `parent_category` if there is one, otherwise `category`), so Cameras and Lenses both sort as Photography, as in the spec's sample.
+
+### D11. Hand sorts never change the caller's list
+
+- **Problem:** should `bubble_sort(names)` sort `names` in place (like `list.sort()`) or return a new list (like `sorted()`)?
+- **Chosen:** each hand sort copies the input and returns the sorted copy.
+- **Why:** the benchmark sorts the *same* unsorted list several times. If the first run sorted it in place, every later run would sort already-sorted data, which is insertion and bubble sort's best case (O(n)). The median would then be a lie. The copy costs O(n), which is negligible next to O(n²).
