@@ -2,11 +2,17 @@
 
 Every date-dependent method receives `today` as a parameter instead of
 calling date.today(), so tests can choose the date.
+
+Phase 3: GearShare reads and writes through a storage layer (storage/).
+It holds the shop as objects in memory (for polymorphism and the Phase 2
+O(1) indexes) and WRITES THROUGH every change to the database, one
+transaction per business operation. It contains no SQL (DECISIONS D26).
 """
 
 import csv
 import functools
 from collections import deque
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -21,12 +27,14 @@ from errors import (
     ItemNotRentableError,
     RentalLimitExceededError,
     RentalNotFoundError,
+    StorageError,
     UndoNotPossibleError,
     UnpaidFinesError,
     WaitingListError,
 )
 from items import item_from_row, validate_sku
 from rentals import Fine, Rental, parse_date
+from storage import NullStorage
 
 FINE_LIMIT = 500  # R4: renting is blocked only when unpaid fines are ABOVE this
 UNDO_LIMIT = 20   # how many rent/return actions option 9 can step back through
@@ -37,24 +45,32 @@ def rupees(amount):
     return f"₹{amount}"
 
 
-def audit(method):
-    """Decorator: after a successful rent / return_item / extend, append
-    time, action, customer and item to the service's audit_log.
+def _now():
+    return datetime.now().isoformat(timespec="seconds")
 
-    If the method raises, nothing is logged: the exception passes straight
-    through, because the append line is never reached.
+
+def audit(method):
+    """Decorator: run rent / return_item / extend as ONE unit of work, and
+    after it succeeds, record time, action, customer and item in the audit log.
+
+    The operation's own writes and its audit row share one database
+    transaction (Task 3.6): both are saved, or neither is. If the method
+    raises, nothing is logged, because the logging lines are never reached.
     """
     @functools.wraps(method)
     def wrapper(self, *args, **kwargs):
-        result = method(self, *args, **kwargs)
-        rental = getattr(result, "rental", result)  # ReturnReceipt or Rental
-        self.audit_log.append({
-            "time": datetime.now().isoformat(timespec="seconds"),
-            "action": method.__name__,
-            "customer": rental.customer.customer_id,
-            "item": rental.item.sku,
-            "rental_id": rental.rental_id,
-        })
+        with self._unit_of_work():
+            result = method(self, *args, **kwargs)
+            rental = getattr(result, "rental", result)  # ReturnReceipt or Rental
+            entry = {
+                "time": _now(),
+                "action": method.__name__,
+                "customer": rental.customer.customer_id,
+                "item": rental.item.sku,
+                "rental_id": rental.rental_id,
+            }
+            self.storage.rentals.add_audit(entry)
+        self.audit_log.append(entry)
         return result
     return wrapper
 
@@ -84,7 +100,13 @@ class UndoEntry:
 
 
 class GearShare:
-    def __init__(self):
+    def __init__(self, storage=None):
+        # Where data is saved: a real Storage (SQLite) or NullStorage (memory only,
+        # used by the Phase 2 benchmarks). GearShare calls the same methods either way.
+        self.storage = storage or NullStorage()
+        self._clear()
+
+    def _clear(self):
         # dict by SKU / customer ID: O(1) lookup for every rent/return/search.
         self.items = {}
         self.customers = {}
@@ -109,15 +131,40 @@ class GearShare:
         # maxlen keeps only the last UNDO_LIMIT actions; the oldest fall off.
         self.undo_stack = deque(maxlen=UNDO_LIMIT)
 
+    @contextmanager
+    def _unit_of_work(self):
+        """One business operation = one database transaction.
+
+        If the database refuses anything, the transaction rolls back AND the
+        in-memory shop is reloaded from the database, so the two never disagree.
+        Rule violations (GearShareError) are raised before anything changes.
+        """
+        try:
+            with self.storage.transaction():
+                yield
+        except StorageError:
+            self.load_data()
+            raise
+
     # ------------------------------------------------------------------ loading
 
-    def load_data(self, folder="data"):
-        """Read the four CSV files and rebuild availability from open rentals."""
-        folder = Path(folder)
-        self._load_items(folder / "gear.csv")
-        self._load_customers(folder / "customers.csv")
-        self._load_rentals(folder / "rentals.csv")
-        self._load_fines(folder / "fines.csv")
+    def load_data(self, folder=None):
+        """Load the shop.
+
+        folder=None  -> from the storage layer (the database): the normal case.
+        folder=path  -> from the four starter CSV files, in memory only
+                        (Phase 1 behaviour; used by the Phase 2 benchmarks).
+        Availability is always rebuilt from the rentals with no return date.
+        """
+        self._clear()
+        if folder is None:
+            self._load_from_storage()
+        else:
+            folder = Path(folder)
+            self._load_items(folder / "gear.csv")
+            self._load_customers(folder / "customers.csv")
+            self._load_rentals(folder / "rentals.csv")
+            self._load_fines(folder / "fines.csv")
         Rental.reset_counter(r.rental_id for r in self.rentals)
         return {
             "items": len(self.items),
@@ -126,6 +173,30 @@ class GearShare:
             "fines": len(self.fines),
         }
 
+    def _load_from_storage(self):
+        for item in self.storage.items.all():
+            self.items[item.sku] = item
+        for customer in self.storage.customers.all():
+            self._register_customer(customer)
+        for row in self.storage.rentals.all():
+            self._add_rental(Rental(
+                rental_id=row["rental_id"],
+                customer=self.customers[row["customer_id"]],
+                item=self.items[row["sku"]],
+                issue_date=row["issue_date"],
+                due_date=row["due_date"],
+                return_date=row["return_date"],
+                extensions=row["extensions"],
+            ))
+        for row in self.storage.rentals.all_fines():
+            self._add_fine(Fine(row["rental_id"], row["amount"], bool(row["paid"])))
+        for row in self.storage.rentals.all_waiting():
+            if row["status"] == "reserved":
+                self.reservations.setdefault(row["sku"], []).append(row["customer_id"])
+            else:
+                self.waiting_lists.setdefault(row["sku"], deque()).append(row["customer_id"])
+        self.audit_log = self.storage.rentals.all_audit()
+
     @staticmethod
     def _read_csv(path):
         with open(path, newline="", encoding="utf-8") as f:
@@ -133,18 +204,17 @@ class GearShare:
 
     def _load_items(self, path):
         for line_no, row in enumerate(self._read_csv(path), start=2):
-            try:
-                self.add_item(item_from_row(row))
-            except ValueError as e:
-                raise ValueError(f"{path.name} line {line_no}: {e}") from None
+            item = item_from_row(row)
+            if item.sku in self.items:
+                raise ValueError(f"{path.name} line {line_no}: duplicate SKU {item.sku} "
+                                 f"(already used by '{self.items[item.sku].name}').")
+            self.items[item.sku] = item
 
     def _load_customers(self, path):
         for row in self._read_csv(path):
             customer_class = TIER_CLASSES[row["membership_type"]]
-            customer = customer_class(row["customer_id"], row["name"], row["email"])
-            self.customers[customer.customer_id] = customer
-            self.held_skus[customer.customer_id] = set()
-            self.rentals_by_customer[customer.customer_id] = []
+            self._register_customer(
+                customer_class(row["customer_id"], row["name"], row["email"]))
 
     def _load_rentals(self, path):
         for row in self._read_csv(path):
@@ -167,11 +237,18 @@ class GearShare:
     # collections and the indexes can never disagree.
 
     def add_item(self, item):
-        """Add a new item to the catalogue. R9: a SKU identifies one item."""
+        """Add a new item to the catalogue (and the database). R9: SKUs are unique."""
         if item.sku in self.items:
             raise ValueError(f"duplicate SKU {item.sku} "
                              f"(already used by '{self.items[item.sku].name}').")
+        with self._unit_of_work():
+            self.storage.items.add(item)
         self.items[item.sku] = item
+
+    def _register_customer(self, customer):
+        self.customers[customer.customer_id] = customer
+        self.held_skus[customer.customer_id] = set()
+        self.rentals_by_customer[customer.customer_id] = []
 
     def _add_rental(self, rental):
         self.rentals.append(rental)
@@ -274,8 +351,6 @@ class GearShare:
         if not has_reservation and item.available_units <= len(reserved):
             raise ItemNotAvailableError(f"No units of '{item.name}' are available.")
 
-        if has_reservation:
-            reserved.remove(customer.customer_id)
         rental = Rental(
             rental_id=Rental.next_id(),
             customer=customer,
@@ -283,6 +358,11 @@ class GearShare:
             issue_date=today,
             due_date=today + timedelta(days=item.rental_days(customer)),
         )
+        # Database first: if it refuses, memory has not been touched yet.
+        self.storage.rentals.add(rental)
+        if has_reservation:
+            self.storage.rentals.remove_waiting(item.sku, customer.customer_id)
+            reserved.remove(customer.customer_id)
         self._add_rental(rental)  # also takes the unit and records it as held
         self.undo_stack.append(UndoEntry("rent", rental.rental_id, customer.customer_id,
                                          used_reservation=has_reservation))
@@ -297,12 +377,14 @@ class GearShare:
         fee = rental.late_fee(today)
 
         rental.close(today)
+        self.storage.rentals.update(rental)
         del self.open_rentals[rental.rental_id]
         rental.item.check_in_unit()
         self.held_skus[rental.customer.customer_id].discard(rental.item.sku)
         fine = None
         if fee > 0:
             fine = Fine(rental.rental_id, fee, paid=False)
+            self.storage.rentals.add_fine(fine)
             self._add_fine(fine)
 
         # R7: the first person waiting is served first.
@@ -310,6 +392,7 @@ class GearShare:
         queue = self.waiting_lists.get(rental.item.sku)
         if queue:
             next_id = queue.popleft()
+            self.storage.rentals.set_waiting_status(rental.item.sku, next_id, "reserved")
             self.reservations.setdefault(rental.item.sku, []).append(next_id)
             next_customer = self.customers[next_id]
 
@@ -334,6 +417,7 @@ class GearShare:
             raise ExtensionNotAllowedError(
                 f"'{item.name}' cannot be extended because another customer is waiting.")
         rental.extend()
+        self.storage.rentals.update(rental)
         return rental
 
     # ------------------------------------------------------------------ waiting list
@@ -355,6 +439,8 @@ class GearShare:
         if item.available_units > len(self.reservations.get(item.sku, [])):
             raise WaitingListError(
                 f"'{item.name}' has a unit available. Rent it instead.")
+        with self._unit_of_work():
+            self.storage.rentals.add_waiting(item.sku, customer.customer_id, _now())
         queue = self.waiting_lists.setdefault(item.sku, deque())
         queue.append(customer.customer_id)
         return len(queue)
@@ -372,14 +458,17 @@ class GearShare:
             return None
         entry = self.undo_stack.pop()
         reverse = {"rent": self._undo_rent, "return": self._undo_return}[entry.action]
-        rental = reverse(entry)
-        self.audit_log.append({
-            "time": datetime.now().isoformat(timespec="seconds"),
-            "action": f"undo_{entry.action}",
-            "customer": entry.customer_id,
-            "item": rental.item.sku,
-            "rental_id": rental.rental_id,
-        })
+        with self._unit_of_work():
+            rental = reverse(entry)
+            log = {
+                "time": _now(),
+                "action": f"undo_{entry.action}",
+                "customer": entry.customer_id,
+                "item": rental.item.sku,
+                "rental_id": rental.rental_id,
+            }
+            self.storage.rentals.add_audit(log)
+        self.audit_log.append(log)
         return entry.action, rental
 
     def _undo_rent(self, entry):
@@ -388,13 +477,15 @@ class GearShare:
             raise UndoNotPossibleError(
                 f"Cannot undo rental {entry.rental_id}: it has already been returned.")
         sku = rental.item.sku
+        self.storage.rentals.delete(rental.rental_id)
+        if entry.used_reservation:   # give the held unit back to the same customer
+            self.storage.rentals.add_waiting(sku, entry.customer_id, _now(), "reserved")
+            self.reservations.setdefault(sku, []).insert(0, entry.customer_id)
         del self.open_rentals[rental.rental_id]
         self.rentals.remove(rental)
         self.rentals_by_customer[entry.customer_id].remove(rental)
         rental.item.check_in_unit()
         self.held_skus[entry.customer_id].discard(sku)
-        if entry.used_reservation:   # give the held unit back to the same customer
-            self.reservations.setdefault(sku, []).insert(0, entry.customer_id)
         Rental.release_id(rental.rental_id)
         return rental
 
@@ -422,12 +513,15 @@ class GearShare:
                 f"{customer.name} would break R3 or R8.")
 
         if served is not None:       # back to the FRONT of the queue, not the end
+            self.storage.rentals.set_waiting_status(item.sku, served, "waiting")
             reserved.remove(served)
             self.waiting_lists.setdefault(item.sku, deque()).appendleft(served)
         if entry.fine is not None:
+            self.storage.rentals.delete_fine(rental.rental_id)
             self.fines.remove(entry.fine)
             self.fines_by_rental[rental.rental_id].remove(entry.fine)
         rental.return_date = None
+        self.storage.rentals.update(rental)
         self.open_rentals[rental.rental_id] = rental
         item.check_out_unit()
         held.add(item.sku)
@@ -472,4 +566,3 @@ class GearShare:
                    self.customers.values())
         debtors = filter(lambda pair: pair[1] > 0, owed)
         return sorted(debtors, key=lambda pair: (-pair[1], pair[0].name))
-

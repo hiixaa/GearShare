@@ -6,7 +6,7 @@ A rental system for **FrameWorks Gear Rental**, built in four phases:
 |-------|---------------|-------------|
 | 1     | Python + OOP  | Done        |
 | 2     | DSA           | Done        |
-| 3     | SQL           | —           |
+| 3     | SQL           | Done        |
 | 4     | React + API   | —           |
 
 ## Requirements
@@ -23,6 +23,18 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1          # macOS / Linux: source .venv/bin/activate
 pip install -r requirements.txt
 ```
+
+## Create the database (once)
+
+Since Phase 3, everything is saved in a SQLite database, `data/gearshare.db`.
+Create it (or reset it to the starter data at any time) with:
+
+```powershell
+python -m sql.setup_db
+```
+
+Always run the SQL scripts with `python -m ...` (not `python sql/...py`), and
+the tests with `python -m pytest`. See DECISIONS D22 for why.
 
 ## Run the console
 
@@ -48,8 +60,9 @@ Remove it with `Remove-Item Env:TODAY`.
 python -m pytest -v
 ```
 
-Each test loads a fresh copy of the starter data, so tests never depend on
-each other. `tests/test_main.py` replays every sample transcript from the spec
+Each test gets its own fresh temporary database with the starter data, so
+tests never depend on each other, and every Phase 1 and 2 test runs with the
+real database underneath. `tests/test_main.py` replays every sample transcript from the spec
 through the real menu and compares the output line by line.
 
 ## Phase 2: data structures, demos and benchmarks
@@ -77,6 +90,26 @@ python benchmarks/benchmark_word_index.py     # 2.3 stretch: word index
 python benchmarks/benchmark_queue.py          # 2.4 list.pop(0) vs deque.popleft()
 ```
 
+## Phase 3: the database
+
+The engine now loads from and saves to `data/gearshare.db`: a rental made
+today is still there after the program is closed and opened again.
+
+```powershell
+python -m sql.setup_db                        # create / reset: schema + seed + indexes
+python -m sql.run_sql sql/queries.sql         # the 12 business queries
+python -m sql.run_sql sql/tx_demo.sql         # rent as one transaction; rollback leaves no trace
+python -m sql.index_report --explain Q12 Q5   # 100,000 rentals, EXPLAIN before/after (~1 min)
+python -m sql.injection_demo                  # the SQL injection experiment
+python -m sql.build_flat                      # rebuild data/gearshare_flat.csv
+```
+
+Write-ups:
+- [docs/normalisation.md](docs/normalisation.md): flat file, anomalies, 1NF → 2NF → 3NF
+- [docs/GearShare_ER_Diagram.png](docs/GearShare_ER_Diagram.png): ER diagram (dbdiagram.io)
+- [docs/index_report.md](docs/index_report.md): EXPLAIN before/after, and the index not created
+- [docs/query_results.txt](docs/query_results.txt): output of the 12 queries
+
 ## Project layout
 
 ```
@@ -89,8 +122,10 @@ errors.py       GearShareError and its children
 import_gear.py  import a gear CSV, skipping duplicate SKUs (Phase 2)
 dsa/            Phase 2: search, sorting, hashing, history, categories
 benchmarks/     Phase 2: fake-data generator and timing scripts
-data/           starter CSV files (+ gear_with_duplicate.csv)
-docs/           class diagram, CRC cards, benchmark report, test output
+storage/        Phase 3: the only code that talks SQL (one class per table group)
+sql/            Phase 3: schema, seed, queries, tx_demo, indexes + scripts that run them
+data/           starter CSVs, gearshare_flat.csv, gearshare.db (created, not committed)
+docs/           diagrams, reports, normalisation write-up, test and query output
 tests/          pytest tests
 DECISIONS.md    design decision log
 ```
@@ -107,15 +142,18 @@ DECISIONS.md    design decision log
 | R6 | Max 2 extensions; none if someone waits | `GearShare.extend()`, `Rental.extend()`, `Rental.MAX_EXTENSIONS` | `test_gearshare.py::test_r6_extend_twice_then_refused`, `test_r6_no_extension_when_someone_is_waiting` |
 | R7 | Waiting list, first come first served | `GearShare.join_waiting_list()`, `return_item()`, `rent()` step 7 | `test_gearshare.py::test_r7_no_unit_free`, `test_r7_first_in_waiting_list_is_served_first` |
 | R8 | One unit of the same item per customer | `GearShare.rent()` step 6 (`held_skus` set) | `test_gearshare.py::test_r8_no_two_units_of_same_item` |
-| R9 | SKU is exactly 10 digits and unique | `items.validate_sku()` (`GearItem.sku` setter), duplicate check in `load_data()` | `test_models.py::test_r9_sku_must_be_exactly_10_digits`, `test_gearshare.py::test_invalid_sku` |
+| R9 | SKU is exactly 10 digits and unique | `items.validate_sku()` (`GearItem.sku` setter), `GearShare.add_item()`; in the database `items.sku` is the PRIMARY KEY with a 10-digit CHECK | `test_models.py::test_r9_sku_must_be_exactly_10_digits`, `test_gearshare.py::test_invalid_sku` |
 | R10 | Due date is not late; the next day is | `Rental.days_late()` | `test_models.py::test_r10_return_on_due_date_is_not_late` |
 
 Every exception has a `pytest.raises` test: `InvalidSKUError`, `ItemNotFoundError`,
 `CustomerNotFoundError`, `RentalNotFoundError`, `ItemNotRentableError`,
 `UnpaidFinesError`, `RentalLimitExceededError`, `DuplicateRentalError`,
-`ItemNotAvailableError`, `ExtensionNotAllowedError`, `WaitingListError`.
+`ItemNotAvailableError`, `ExtensionNotAllowedError`, `WaitingListError`,
+`UndoNotPossibleError` (Phase 2), `StorageError` (Phase 3).
 
 ## Design
 
 - [docs/class_diagram.md](docs/class_diagram.md): class diagram, inheritance vs composition, CRC cards
+- [docs/benchmark_report.md](docs/benchmark_report.md): Phase 2 measurements
+- [docs/normalisation.md](docs/normalisation.md), [docs/index_report.md](docs/index_report.md): Phase 3
 - [DECISIONS.md](DECISIONS.md): every design decision and the alternatives rejected

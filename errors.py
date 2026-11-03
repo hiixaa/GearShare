@@ -50,6 +50,10 @@ class UndoNotPossibleError(GearShareError):
     """Phase 2: the latest action can't be reversed any more (state changed since)."""
 
 
+class StorageError(GearShareError):
+    """Phase 3: the database refused a read or write (the operation was rolled back)."""
+
+
 # --- Rule violations (reported by rule number) ------------------------------
 
 class ItemNotRentableError(GearShareError):

@@ -1,9 +1,11 @@
 """GearShare Mini console.
 
+First time (creates data/gearshare.db):  python -m sql.setup_db
 Run (PowerShell):  $env:TODAY="2026-11-03"; python main.py
 Run (bash):        TODAY=2026-11-03 python main.py
 
-This file only talks to the user. Every rule lives in GearShare.
+This file only talks to the user. Every rule lives in GearShare, and
+everything is saved in the database, so it survives a restart (Phase 3).
 """
 
 import os
@@ -13,8 +15,9 @@ from pathlib import Path
 
 from errors import GearShareError, ItemNotAvailableError
 from gearshare import GearShare, rupees
+from storage import Storage
 
-DATA_DIR = Path(__file__).parent / "data"
+DB_PATH = Path(__file__).parent / "data" / "gearshare.db"
 
 
 class Cancelled(Exception):
@@ -220,30 +223,34 @@ class Console:
 
 # ---------------------------------------------------------------- start-up
 
-def main(read=input, env=os.environ, data_dir=DATA_DIR):
+def main(read=input, env=os.environ, db_path=DB_PATH):
     try:
         today = today_from_env(env)
     except ValueError:
         print(f"TODAY must be a date like 2026-11-03, not '{env.get('TODAY')}'.")
         return 1
 
-    shop = GearShare()
     try:
-        counts = shop.load_data(data_dir)
-    except (OSError, ValueError, KeyError) as e:
-        print(f"Could not load data from {data_dir}: {e}")
+        storage = Storage(db_path)
+    except GearShareError as e:     # e.g. the database hasn't been created yet
+        print(e.message)
         return 1
 
-    print(f"Loaded {counts['items']} items, {counts['customers']} customers, "
-          f"{counts['rentals']} rentals, {counts['fines']} fines.")
-    print(f"Today is {today}.")
-
     try:
+        shop = GearShare(storage)
+        counts = shop.load_data()
+        print(f"Loaded {counts['items']} items, {counts['customers']} customers, "
+              f"{counts['rentals']} rentals, {counts['fines']} fines.")
+        print(f"Today is {today}.")
         Console(shop, today, read).run()
     except (EOFError, KeyboardInterrupt):
         print()  # Ctrl+Z / Ctrl+C: leave on a clean line instead of a traceback
+    except GearShareError as e:     # the database refused to load
+        print(f"ERROR [{e.code}]: {e.message}")
+        return 1
     finally:
-        # Runs on every exit path. Phase 3 closes the database connection here.
+        # Runs on every exit path: always close the database connection.
+        storage.close()
         sys.stdout.flush()
     return 0
 

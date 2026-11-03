@@ -180,3 +180,166 @@ Each entry: the problem, the options, what was chosen and why.
 - **Why:** the shop's real tree is 3 levels deep, where recursion is the clearest code and the depth limit is irrelevant. The iterative versions prove the same results can be produced without the call stack, and a test shows they survive a 10,000-level tree where the recursive one raises `RecursionError`.
 - **Rejected:** "just raise `sys.setrecursionlimit`". Measured on Python 3.14: it let plain-Python `path_to` reach depth 200,000, but `total_items` (which recurses through C's `sum()`) still overflowed the real C stack at depth 10,000 with the limit at 20,000. The limit is a safety counter, not more stack.
 - **Tree order:** children are kept sorted by name, so `print_tree` output is the same however the items were loaded.
+
+---
+
+## Phase 3: SQL
+
+### D18. SQLite, not PostgreSQL
+
+- **Problem:** the spec allows SQLite or PostgreSQL, but the choice must be the same for Part A (SQL files) and Part B (Python engine).
+- **Options:**
+  1. **PostgreSQL:** a real server, richer types (`DATE`, `SERIAL`), and what most production shops use.
+  2. **SQLite:** a single file, built into Python (`sqlite3`), with nothing to install.
+- **Chosen:** SQLite.
+- **Why:**
+  - Anyone can run the project from a clean copy with no server and no `pip install`. Earlier, pip couldn't even reach pypi.org on this network.
+  - Every test can get a fresh, throw-away database (`:memory:` or a temp file) in milliseconds, which the spec asks for in 3.7.
+  - It supports everything Phase 3 needs: foreign keys, `CHECK` constraints, transactions, indexes and `EXPLAIN QUERY PLAN`.
+- **Costs, and how they are handled:**
+  - SQLite has no real `DATE` type, so dates are stored as ISO text `YYYY-MM-DD`. ISO text sorts and compares in date order, and `julianday()` does date arithmetic.
+  - Foreign keys are **off by default** in SQLite, so every connection runs `PRAGMA foreign_keys = ON`.
+- **When I would choose differently:** several app servers writing at the same time (the Phase 4 API under real load), or many concurrent users. SQLite allows only one writer at a time. Moving would mean changing the connection code and a few types, but the SQL in `queries.sql` is standard.
+
+### D19. Available units: calculated, not stored
+
+- **Problem:** "how many units of the Canon are free?" can be **stored** in an `items.available_units` column, or **calculated** as `total_units − (open rentals of that SKU)`.
+- **For storing it:**
+  - Reading is one column with no join, which is fastest for the catalogue page, which shows availability for every item on every visit.
+  - Renting can claim a unit atomically: `UPDATE items SET available_units = available_units - 1 WHERE sku = ? AND available_units > 0`. The database itself refuses to go below zero, even when two rent requests arrive together.
+- **For calculating it:**
+  - It is derived data: the open rentals already say how many units are out. A stored copy is a **second source of truth** that can disagree with the first. That is exactly the update anomaly normalisation removes. Every rent, return, undo and manual fix would have to update both, or the shop shows "1 available" when nothing is on the shelf.
+  - Phase 1 already works this way: availability is **rebuilt** from rentals with no return date.
+  - The spec's Q11 is literally "units available right now", computed from rentals.
+- **Chosen:** calculate it (`total_units − COUNT(open rentals)`), with an index on rentals so the count stays fast (Task 3.6).
+- **Two rent requests at the same moment:** with a calculated value, "check availability, then insert the rental" must be one transaction that **locks before reading**. In SQLite that is `BEGIN IMMEDIATE`, which takes the write lock first, so the second request waits, then sees the first rental and gets "No units available". Without the lock, both could read "1 free" and both insert.
+- **When I would denormalise (store it):** when reading availability is measured to be too slow, e.g. 10 million rentals and a catalogue page showing thousands of items. Then I'd store `available_units`, update it **in the same transaction** as every rental insert/return, add `CHECK (available_units BETWEEN 0 AND total_units)`, and keep a scheduled job that recalculates it from rentals and reports any difference.
+
+### D20. Every `ON DELETE`, chosen on purpose
+
+- **Problem:** for each foreign key, what should happen to the child rows when the parent row is deleted? The spec asks in particular: *what should happen to a customer's rentals if the customer is deleted?*
+- **Options for customer → rentals:**
+  1. `CASCADE`: deleting Rohan deletes RN002, RN009, RN010, and through fines, his unpaid ₹600.
+  2. `SET NULL`: keep the rentals but forget who rented them.
+  3. `RESTRICT`: refuse to delete a customer who has any rental history.
+- **Chosen:** `RESTRICT`.
+- **Why:**
+  - With `CASCADE`, deleting one customer silently rewrites the shop's history. Q4 "most rented items" and Q7 "fines per tier per month" would change after the fact, and unpaid fines would simply vanish.
+  - **The accountant** (revenue and fines reports), **the owner** (which gear is popular) and **anyone settling a dispute** ("who had the drone on 24 October?") would all object.
+  - `SET NULL` keeps the numbers but loses accountability, and `customer_id` is `NOT NULL` anyway.
+  - If a customer must leave (for example, a privacy request), the right move is to **anonymise** the customer row (name and email replaced), not to delete history.
+- **All the other choices:**
+
+| Foreign key | ON DELETE | Why |
+|---|---|---|
+| customers.tier → membership_tiers | RESTRICT (+ ON UPDATE CASCADE) | A tier with customers can't vanish; renaming a tier updates its customers. |
+| rentals.customer_id → customers | **RESTRICT** | History must survive (above). |
+| rentals.sku → items | RESTRICT | Same reason: a rented item stays for the records (retire it, don't delete it). |
+| fines.rental_id → rentals | RESTRICT | Money owed must never disappear as a side effect. Undo-of-return deletes the fine **explicitly** first. |
+| items.category_id → categories | RESTRICT | Move the items before deleting their category. |
+| categories.parent_id → categories | RESTRICT | Can't delete Photography while Cameras and Lenses hang under it. |
+| item_tags.sku → items | CASCADE | Tag links mean nothing without the item. |
+| item_tags.tag_id → tags | CASCADE | Deleting a tag removes it from every item. |
+| waiting_list → items / customers | CASCADE | A queue entry is meaningless once its item or customer is gone. |
+| audit_log | no foreign keys | The log must still describe rows that were later deleted (e.g. "RN011 rented, then undone"). |
+
+### D21. SQL `CHECK` passes on NULL: date checks use `IS`, not `=`
+
+- **Problem:** the first version of `schema.sql` had `CHECK (date(due_date) = due_date)`. A test showed that `'2026-13-03'` was **accepted**: `date('2026-13-03')` is `NULL`, `NULL = '2026-13-03'` is `NULL`, and SQL treats a `CHECK` that evaluates to `NULL` as **passed** (only `FALSE` fails).
+- **Options:** add `AND date(x) IS NOT NULL` to every check, or compare with `IS` (`NULL IS 'text'` is false, not NULL).
+- **Chosen:** `CHECK (date(x) IS x)`. It's shorter, and it also rejects impossible dates like `2026-02-30` (which `date()` silently rolls over to `2026-03-02`, so it isn't equal to the input).
+- **Lesson:** every `CHECK` was tested with a bad row. The bug was only found because a test inserted an invalid date and expected an error.
+
+### D22. SQL scripts run as modules (`python -m sql.run_sql`)
+
+- **Problem:** on this laptop, `python sql/run_sql.py sql/schema.sql` fails with `PermissionError: [Errno 13] Permission denied` when reading the `.sql` file.
+- **What was tested:**
+  - The same code started with `python -m sql.run_sql` or `python -c` reads the file fine.
+  - A script reading a `.txt` copy of the same file works.
+  - A script reading a `.sql` copy **outside OneDrive** (in `%TEMP%`) still fails.
+  - So it isn't the code, OneDrive or the file. A security rule on the machine blocks Python processes started as `python <file>.py` from opening `.sql` files.
+- **Options:**
+  1. Rename the files to `.txt`. That breaks the spec's required names (`schema.sql`, `seed.sql`, ...).
+  2. Ask IT for an exception. That's out of our control, and other machines may differ.
+  3. Run the scripts as modules: `sql/` becomes a package (`sql/__init__.py`) and every command is `python -m sql.<script>`.
+- **Chosen:** Option 3. It works here and on any normal machine, and keeps the spec's file names.
+- **Consequence for Part B (3.7):** `python main.py` is started as a script, so it must **not** read `schema.sql` at start-up. The database is created once by a `-m` command (`python -m sql.setup_db`), and the engine only opens it.
+- **Consequence for tests:** run them with `python -m pytest` (as the README says). The `pytest.exe` launcher counts as a script, so the database tests fail with the same `PermissionError` when it is used.
+
+### D23. Q11 and the display item: "available" means "on the shelf"
+
+- **Problem:** Q11 "units available right now" shows the Vintage Leica (Showcase) with **1** available, but R1 says it can never be rented. Is 1 a wrong answer?
+- **Options:**
+  1. Show 1: the unit is physically in the shop (`total_units − open rentals`).
+  2. Show 0 for display items (`CASE WHEN item_type = 'Display' THEN 0 ...`).
+  3. Leave display items out of Q11 (`WHERE item_type <> 'Display'`).
+- **Chosen:** Option 1, matching the spec's expected output.
+- **Why:** Q11 answers one question, "how many units are not out on rental?", and that is the same calculation for every item. Whether an item **may** be rented is a different fact, already stored in `item_type` and enforced by `DisplayItem.is_rentable()` (R1). Mixing the two into one number would hide which fact caused a 0: is the Leica out on rental, or not for rent? It's the same split the console already makes: the catalogue prints `not rentable` for the Leica instead of a number, based on the item type, not on the count.
+- **When I'd change it:** a page that only asks "what can I rent now?" (like the website's catalogue filter) should use option 3, or add a separate `rentable` column, rather than redefining "available".
+
+### D24. Join choices in the query pack
+
+- **Problem:** each of the 12 queries needs a join type, and the wrong one silently drops or adds rows.
+- **Rule used:** `INNER JOIN` when every row we want **has** a match (a rental always has a customer and an item). `LEFT JOIN` when the rows we want are exactly the ones **without** a match (Q5: never rented; Q6: no recent rental; Q11: items with no open rental still need a row).
+- **Two traps avoided:**
+  - **Q6, filter in `ON`, not `WHERE`:** `LEFT JOIN rentals ... WHERE r.issue_date >= '2026-08-05'` would discard the NULL rows and quietly behave like an INNER JOIN, losing Pooja (who has never rented). The date filter belongs in the `ON` clause.
+  - **Q11, `COUNT(r.rental_id)`, not `COUNT(*)`:** after a LEFT JOIN, an item with no open rentals still produces one row (of NULLs). `COUNT(*)` counts that row as 1, which would make the SD card show 2 instead of 3. `COUNT(column)` skips NULLs.
+- **Q12** uses a **self-join** (a table joined to itself on the same customer), with `a.name < b.name` so each pair appears once and an item never pairs with itself.
+
+### D25. One covering index on rentals, chosen by measurement
+
+- **Problem:** with 100,000 rentals, the two slowest queries were Q12 (5.5 s) and Q5 (181 ms). SQLite doesn't index foreign keys, so `rentals.sku` had no index.
+- **Options tried, all measured (docs/index_report.md):**
+  1. Simple indexes on the foreign keys (`rentals(sku)`, `rentals(customer_id, ...)`).
+  2. One index per query, each with that query's columns.
+  3. **One covering index** for every query that starts from "rentals of this item": `rentals(sku, return_date, issue_date, customer_id, rental_id)`.
+- **Chosen:** Option 3.
+- **Why:**
+  - Option 1 made Q5, Q6 and Q10 **slower**. The index held only `sku`, so for each of ~100,000 rows SQLite jumped back into the table for the other columns, which is slower than one sequential scan.
+  - Option 2 fixed Q5 (24.7×) but made **Q9 3× slower**, for the same reason: its index lacked `customer_id`.
+  - Option 3 is covering for Q4, Q5, Q9, Q10 and Q11. `sku` comes first because every query looks up by item, and `return_date` second so that "open rentals of this item" (the `rent()` availability check from D19) is one contiguous range. Result: Q5 17×, Q10 3.9×, Q2 3.3×, Q11 2.3×, and nothing measurably slower.
+- **Q12 gets no index.** Its cost is producing about 5 million item pairs, which no index can remove. At scale it should be a precomputed summary.
+- **Not created: `fines(paid)`.** It has 2 distinct values, and Q8 reads every fine anyway, so it would add write cost and save nothing.
+- **Cost of the chosen index:** it repeats 5 of the 7 rental columns, so it roughly doubles the storage for rentals, and every rental insert/return now updates it too. That's acceptable because the shop reads availability far more often than it writes rentals.
+
+### D26. The engine on the database: load once, write through, one transaction per operation
+
+- **Problem:** `GearShare` must read and write through the `storage/` classes instead of lists and CSV files, keep every message identical, and pass every Phase 1 and 2 test.
+- **Options:**
+  1. **Query the database for everything**: every `rent()` runs `SELECT`s for the customer, the item, the fines and availability. There are no in-memory collections at all.
+  2. **Load once, write through**: on start-up, load the shop from the database into objects. Every change is written to the database first, in a transaction, and then applied in memory.
+- **Chosen:** Option 2.
+- **Why:**
+  - The rules need **objects**: `customer.max_items()` and `item.rental_days(customer)` are the polymorphism from Phase 1, so rows would have to become objects on every call anyway.
+  - The Phase 2 indexes (`held_skus`, `open_rentals`, the `deque` waiting lists) keep every rule check O(1) without a round-trip to the database.
+  - All Phase 1 and 2 tests run unchanged, now on a real database.
+  - **The database is the source of truth.** Memory is only a copy made at start-up, and it is rebuilt from the database whenever they could disagree.
+- **How "one unit" is guaranteed:**
+  - `rent`, `return_item` and `extend` run inside the `@audit` decorator, which opens **one** transaction around the operation's writes **and** its audit row. `undo`, `join_waiting_list` and `add_item` open their own.
+  - `Database.transaction()` is a context manager. `BEGIN IMMEDIATE` on entry, `COMMIT` on success, `ROLLBACK` on any exception. Nested use joins the outer transaction.
+  - If the database refuses a write (`StorageError`), the transaction rolls back **and** `GearShare` reloads itself from the database, so memory can never keep a change the database rejected. Tested by forcing the audit insert to fail: the rental row is rolled back too, and memory agrees.
+  - Rule violations (R1–R10) are raised before anything is written, so they never open a write at all.
+- **Layers (the spec's hint):** `gearshare.py` contains neither `sqlite3` nor `SELECT`, and a test checks this. All SQL lives in `storage/`, always with `?` parameters, and a test checks that no `execute()` / `query()` there receives an f-string.
+- **`NullStorage`:** the Phase 2 benchmarks and demos still run in memory from generated CSV files (`load_data(folder)`). Instead of `if storage is None` checks in every method, they get a `NullStorage` with the same interface that saves nothing (the Null Object pattern).
+- **Trade-off:** with option 2, two programs writing to the same database at once would not see each other's changes until a reload. Fine for one console or one API process. A multi-process deployment would move availability checks into SQL (as in `tx_demo.sql`).
+- **Optional path not taken:** SQLAlchemy ORM. Plain DB-API keeps the SQL visible and is what the spec requires; an ORM would hide exactly the SQL this phase is about.
+
+### D27. Parameterised queries everywhere (the injection experiment)
+
+- **Problem:** search text comes from users. How does it reach the database?
+- **Evidence** (`python -m sql.injection_demo`, also `tests/test_injection.py`):
+
+| Call | Rows |
+|---|---|
+| `search_unsafe("Drone")` | 1 |
+| `search_unsafe("' OR '1'='1")` | **7: every item leaked** |
+| `search_safe("' OR '1'='1")` | 0 |
+| `search_safe("Drone")` | 1 |
+
+- **What the f-string version did:** it pasted the text **into the SQL code**:
+  `SELECT name FROM items WHERE name LIKE '%' OR '1'='1%'`.
+  The attacker's first `'` **closed the string literal early**, so the database parsed the rest as SQL. `name LIKE '%'` is true for every row. The user's text changed the *structure* of the query, not just a value in it. With a different payload, the same hole could read other tables (`' UNION SELECT email FROM customers --`).
+- **What the parameterised query did differently (think-about question 4):** the SQL text is fixed, `... LIKE '%' || ? || '%'`, and the database **parses it before it ever sees the user's text**. The text is then sent separately, as a value that fills the `?` slot. It can only ever be data, never code. So `' OR '1'='1` is searched for literally, as a strange name, and matches nothing. Escaping quotes by hand is not the fix: it is easy to miss one case, and placeholders make the mistake impossible.
+- **Chosen rule:** every query in the program uses `?` placeholders (`storage/`, the tests and the benchmark scripts). The **only** SQL built by string formatting is `search_unsafe()` in `sql/injection_demo.py`, a throwaway file that nothing imports. A test checks that no `execute()` / `query()` in `storage/` receives an f-string.
+- **One documented exception, not user input:** `sql/index_report.py` runs `"EXPLAIN QUERY PLAN " + sql`, where `sql` is one of our own 12 queries read from `queries.sql`. `EXPLAIN` wraps a whole statement, so it can't be a `?` value. No user text is ever involved, so there is nothing to inject. (Found by searching the whole project for SQL built from pieces.)
+- **Where the rule doesn't apply:** `?` can stand for a **value** only, not for a table or column name. Where the SQL itself must vary (the test of row counts per table), the full SQL strings are written out as constants, not assembled from pieces.
