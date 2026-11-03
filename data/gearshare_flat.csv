@@ -1,0 +1,11 @@
+rental_id,customer_name,email,tier,item_name,tags,sku,category,parent_category,weight_g,price,issue_date,due_date,return_date,fine,fine_paid
+RN001,Vikram Shah,vikram@example.com,Plus,DJI Mini Drone,video;aerial,1000000003,Drones,,249,38000,2026-10-24,2026-10-29,,,
+RN002,Rohan Das,rohan@example.com,Basic,Canon EOS 200D,photo;dslr,1000000001,Cameras,Photography,450,45000,2026-10-28,2026-10-31,,,
+RN003,Meera Joshi,meera@example.com,Pro,Manfrotto Tripod,support,1000000004,Tripods,,1200,6000,2026-10-30,2026-11-06,,,
+RN004,Ananya Nair,ananya@example.com,Basic,Sony 50mm Lens,photo;lens,1000000002,Lenses,Photography,280,18000,2026-09-10,2026-09-13,2026-09-13,,
+RN005,Ananya Nair,ananya@example.com,Basic,SD Card 128GB,storage,1000000007,Accessories,,2,600,2026-08-01,2026-08-03,2026-08-23,600,yes
+RN006,Meera Joshi,meera@example.com,Pro,DJI Mini Drone,video;aerial,1000000003,Drones,,249,38000,2026-08-05,2026-08-12,2026-08-10,,
+RN007,Vikram Shah,vikram@example.com,Plus,Canon EOS 200D,photo;dslr,1000000001,Cameras,Photography,450,45000,2026-07-10,2026-07-15,2026-07-15,,
+RN008,Vikram Shah,vikram@example.com,Plus,Rode Wireless Mic,audio;interview,1000000005,Audio,,120,22000,2026-06-01,2026-06-06,2026-06-09,300,yes
+RN009,Rohan Das,rohan@example.com,Basic,Rode Wireless Mic,audio;interview,1000000005,Audio,,120,22000,2026-07-01,2026-07-04,2026-07-13,450,no
+RN010,Rohan Das,rohan@example.com,Basic,Canon EOS 200D,photo;dslr,1000000001,Cameras,Photography,450,45000,2026-07-20,2026-07-23,2026-07-26,150,no

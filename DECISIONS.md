@@ -180,3 +180,23 @@ Each entry: the problem, the options, what was chosen and why.
 - **Why:** the shop's real tree is 3 levels deep, where recursion is the clearest code and the depth limit is irrelevant. The iterative versions prove the same results can be produced without the call stack, and a test shows they survive a 10,000-level tree where the recursive one raises `RecursionError`.
 - **Rejected:** "just raise `sys.setrecursionlimit`". Measured on Python 3.14: it let plain-Python `path_to` reach depth 200,000, but `total_items` (which recurses through C's `sum()`) still overflowed the real C stack at depth 10,000 with the limit at 20,000. The limit is a safety counter, not more stack.
 - **Tree order:** children are kept sorted by name, so `print_tree` output is the same however the items were loaded.
+
+---
+
+## Phase 3: SQL
+
+### D18. SQLite, not PostgreSQL
+
+- **Problem:** the spec allows SQLite or PostgreSQL, but the choice must be the same for Part A (SQL files) and Part B (Python engine).
+- **Options:**
+  1. **PostgreSQL:** a real server, richer types (`DATE`, `SERIAL`), and what most production shops use.
+  2. **SQLite:** a single file, built into Python (`sqlite3`), with nothing to install.
+- **Chosen:** SQLite.
+- **Why:**
+  - Anyone can run the project from a clean copy with no server and no `pip install`. Earlier, pip couldn't even reach pypi.org on this network.
+  - Every test can get a fresh, throw-away database (`:memory:` or a temp file) in milliseconds, which the spec asks for in 3.7.
+  - It supports everything Phase 3 needs: foreign keys, `CHECK` constraints, transactions, indexes and `EXPLAIN QUERY PLAN`.
+- **Costs, and how they are handled:**
+  - SQLite has no real `DATE` type, so dates are stored as ISO text `YYYY-MM-DD`. ISO text sorts and compares in date order, and `julianday()` does date arithmetic.
+  - Foreign keys are **off by default** in SQLite, so every connection runs `PRAGMA foreign_keys = ON`.
+- **When I would choose differently:** several app servers writing at the same time (the Phase 4 API under real load), or many concurrent users. SQLite allows only one writer at a time. Moving would mean changing the connection code and a few types, but the SQL in `queries.sql` is standard.
