@@ -35,3 +35,21 @@ Each entry: the problem, the options, what was chosen and why.
 - **Chosen:** Option 3, `Rental.late_fee(returned_on)`.
 - **Why:** The rental is the only object that naturally has all three inputs, and the calculation can be tested on a single `Rental` with no service, no files and no setup. *Against it:* if fees ever depended on shop-wide policy (for example, holidays), the rental would need to be told about that policy, and the service would be the better home.
 - **Consequence (tier upgrade question):** because `Rental` holds a reference to the `Customer` object, a customer upgraded from Basic to Pro gets the **new** rate and limit applied to existing rentals at return time. If the shop wanted the rate fixed at issue time, `Rental` would store `fee_per_day` when created. That is a one-line change, because the calculation lives in one place.
+
+### D4. Class attribute vs instance attribute for the rental number
+
+- **Problem:** new rentals need the next ID (`RN011`), and IDs must be unique across the whole shop.
+- **Options:**
+  1. An instance attribute on each `Rental` (each object would have its own counter, so they would all start at 1).
+  2. A class attribute `Rental._next_number`, shared by every `Rental`.
+  3. A counter on the `GearShare` service.
+- **Chosen:** Option 2, with `Rental.reset_counter(ids)` called by `load_data()`.
+- **Why:** the counter describes *all* rentals, not one rental, so it belongs to the class. The dates and extension count describe *one* rental, so they are instance attributes. `MAX_EXTENSIONS = 2` is also a class attribute, because R6 is the same for every rental.
+- **Trade-off:** a class attribute is shared by every `GearShare` in the same process (for example, across tests). That is why `load_data()` always resets it from the loaded IDs. If several shops ever ran in one process, option 3 would be safer.
+
+### D5. Validation errors and one extra exception
+
+- **Problem:** the setters must stop invalid objects being created, and returning or extending an unknown rental ID must not crash.
+- **Options:** raise `ValueError` everywhere; create a custom error for every field; or reuse the spec's hierarchy where one fits.
+- **Chosen:** a bad SKU raises `InvalidSKUError` (R9 is a business rule with a fixed message in the spec). Blank names, a missing `@`, and negative units/prices/fines raise `ValueError`, which is Python's standard "bad value" error. I added **`RentalNotFoundError`** (a child of `GearShareError`) because the spec's list has no error for an unknown rental ID, and the menu must still print a clean `ERROR [RentalNotFoundError]: ...` instead of crashing.
+- **Why:** each error carries a `code` (the rule number or the class name), so the console's `ERROR [R3]: ...` and the Phase 4 API's `{"error": "R3"}` come from the same place.
