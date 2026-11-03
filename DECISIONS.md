@@ -285,3 +285,19 @@ Each entry: the problem, the options, what was chosen and why.
   - **Q6, filter in `ON`, not `WHERE`:** `LEFT JOIN rentals ... WHERE r.issue_date >= '2026-08-05'` would discard the NULL rows and quietly behave like an INNER JOIN, losing Pooja (who has never rented). The date filter belongs in the `ON` clause.
   - **Q11, `COUNT(r.rental_id)`, not `COUNT(*)`:** after a LEFT JOIN, an item with no open rentals still produces one row (of NULLs). `COUNT(*)` counts that row as 1, which would make the SD card show 2 instead of 3. `COUNT(column)` skips NULLs.
 - **Q12** uses a **self-join** (a table joined to itself on the same customer), with `a.name < b.name` so each pair appears once and an item never pairs with itself.
+
+### D25. One covering index on rentals, chosen by measurement
+
+- **Problem:** with 100,000 rentals, the two slowest queries were Q12 (5.5 s) and Q5 (181 ms). SQLite doesn't index foreign keys, so `rentals.sku` had no index.
+- **Options tried, all measured (docs/index_report.md):**
+  1. Simple indexes on the foreign keys (`rentals(sku)`, `rentals(customer_id, ...)`).
+  2. One index per query, each with that query's columns.
+  3. **One covering index** for every query that starts from "rentals of this item": `rentals(sku, return_date, issue_date, customer_id, rental_id)`.
+- **Chosen:** Option 3.
+- **Why:**
+  - Option 1 made Q5, Q6 and Q10 **slower**. The index held only `sku`, so for each of ~100,000 rows SQLite jumped back into the table for the other columns, which is slower than one sequential scan.
+  - Option 2 fixed Q5 (24.7×) but made **Q9 3× slower**, for the same reason: its index lacked `customer_id`.
+  - Option 3 is covering for Q4, Q5, Q9, Q10 and Q11. `sku` comes first because every query looks up by item, and `return_date` second so that "open rentals of this item" (the `rent()` availability check from D19) is one contiguous range. Result: Q5 17×, Q10 3.9×, Q2 3.3×, Q11 2.3×, and nothing measurably slower.
+- **Q12 gets no index.** Its cost is producing about 5 million item pairs, which no index can remove. At scale it should be a precomputed summary.
+- **Not created: `fines(paid)`.** It has 2 distinct values, and Q8 reads every fine anyway, so it would add write cost and save nothing.
+- **Cost of the chosen index:** it repeats 5 of the 7 rental columns, so it roughly doubles the storage for rentals, and every rental insert/return now updates it too. That's acceptable because the shop reads availability far more often than it writes rentals.

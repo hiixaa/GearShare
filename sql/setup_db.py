@@ -1,4 +1,4 @@
-"""Create a fresh GearShare database: schema.sql, then seed.sql.
+"""Create a fresh GearShare database: schema.sql, seed.sql, then indexes.sql.
 
     python -m sql.setup_db                      # -> data/gearshare.db
     python -m sql.setup_db --db other.db
@@ -17,13 +17,13 @@ SQL_DIR = Path(__file__).resolve().parent
 
 
 def create_database(db_path, out=print):
-    """Build the schema and load the starter data into db_path."""
-    schema = (SQL_DIR / "schema.sql").read_text(encoding="utf-8")
-    seed = (SQL_DIR / "seed.sql").read_text(encoding="utf-8")
+    """Build the schema, load the starter data and add the indexes in db_path."""
+    scripts = [(SQL_DIR / name).read_text(encoding="utf-8")
+               for name in ("schema.sql", "seed.sql", "indexes.sql")]
     conn = connect(db_path)
     try:
-        run(schema, conn, out)
-        run(seed, conn, out)
+        for script in scripts:
+            run(script, conn, out)
     finally:
         conn.close()
 
