@@ -1,0 +1,6 @@
+customer_id,name,email,membership_type
+C001,Ananya Nair,ananya@example.com,Basic
+C002,Vikram Shah,vikram@example.com,Plus
+C003,Meera Joshi,meera@example.com,Pro
+C004,Rohan Das,rohan@example.com,Basic
+C005,Pooja Menon,pooja@example.com,Plus
