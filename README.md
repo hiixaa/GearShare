@@ -12,6 +12,7 @@ A rental system for **FrameWorks Gear Rental**, built in four phases:
 ## Requirements
 
 - Python 3.12 or newer (developed on 3.14)
+- Node.js 20.19 or newer, for the Phase 4 website (developed on Node 24)
 - Git
 
 ## Setup (from a clean copy)
@@ -144,7 +145,8 @@ cd web; npm test             # basket reducer + form validation
 Phase 4 documents:
 - [docs/component_tree.md](docs/component_tree.md): component tree, and where each piece of state lives
 - [docs/wireframes.md](docs/wireframes.md): the five screens
-- [docs/behaviour_table.md](docs/behaviour_table.md): the spec's behaviour table, as a checklist
+- [docs/behaviour_table.md](docs/behaviour_table.md): the spec's behaviour table, all 16 rows checked in the browser
+- [docs/pytest_phase4.txt](docs/pytest_phase4.txt): 228 passing tests (engine, database and API)
 
 ## Project layout
 
@@ -159,9 +161,9 @@ import_gear.py  import a gear CSV, skipping duplicate SKUs (Phase 2)
 dsa/            Phase 2: search, sorting, hashing, history, categories
 benchmarks/     Phase 2: fake-data generator and timing scripts
 storage/        Phase 3: the only code that talks SQL (one class per table group)
+sql/            Phase 3: schema, seed, queries, tx_demo, indexes + scripts that run them
 api/            Phase 4: FastAPI app over GearShare (api/main.py, errors.py, schemas.py)
 web/            Phase 4: Vite + React website (src/pages, components, context, hooks, lib)
-sql/            Phase 3: schema, seed, queries, tx_demo, indexes + scripts that run them
 data/           starter CSVs, gearshare_flat.csv, gearshare.db (created, not committed)
 docs/           diagrams, reports, normalisation write-up, test and query output
 tests/          pytest tests
