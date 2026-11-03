@@ -263,4 +263,5 @@ Each entry: the problem, the options, what was chosen and why.
   2. Ask IT for an exception. That's out of our control, and other machines may differ.
   3. Run the scripts as modules: `sql/` becomes a package (`sql/__init__.py`) and every command is `python -m sql.<script>`.
 - **Chosen:** Option 3. It works here and on any normal machine, and keeps the spec's file names.
-- **Consequence for Part B (3.7):** `python main.py` is started as a script, so it must **not** read `schema.sql` at start-up. The database is created once by a `-m` command, and the engine only opens it.
+- **Consequence for Part B (3.7):** `python main.py` is started as a script, so it must **not** read `schema.sql` at start-up. The database is created once by a `-m` command (`python -m sql.setup_db`), and the engine only opens it.
+- **Consequence for tests:** run them with `python -m pytest` (as the README says). The `pytest.exe` launcher counts as a script, so the database tests fail with the same `PermissionError` when it is used.

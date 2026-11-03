@@ -6,9 +6,10 @@
 -- date order, and CHECK (date(x) IS x) rejects anything that isn't a real date.
 -- Every ON DELETE below is a deliberate choice; see DECISIONS D20.
 
-PRAGMA foreign_keys = ON;   -- SQLite leaves foreign keys OFF unless asked
-
--- Drop in reverse dependency order so the script can be re-run.
+-- Re-runnable: drop everything first. Foreign keys are OFF only while dropping,
+-- because DROP TABLE deletes the rows first, and ON DELETE RESTRICT (e.g.
+-- Photography -> Cameras) would refuse. They go back ON before any CREATE.
+PRAGMA foreign_keys = OFF;
 DROP TABLE IF EXISTS audit_log;
 DROP TABLE IF EXISTS waiting_list;
 DROP TABLE IF EXISTS fines;
@@ -19,6 +20,7 @@ DROP TABLE IF EXISTS items;
 DROP TABLE IF EXISTS categories;
 DROP TABLE IF EXISTS customers;
 DROP TABLE IF EXISTS membership_tiers;
+PRAGMA foreign_keys = ON;   -- SQLite leaves foreign keys OFF unless asked
 
 
 -- The Rulebook's tier table: one row per tier (3NF: tier -> limits).
