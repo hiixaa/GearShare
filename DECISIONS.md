@@ -200,3 +200,17 @@ Each entry: the problem, the options, what was chosen and why.
   - SQLite has no real `DATE` type, so dates are stored as ISO text `YYYY-MM-DD`. ISO text sorts and compares in date order, and `julianday()` does date arithmetic.
   - Foreign keys are **off by default** in SQLite, so every connection runs `PRAGMA foreign_keys = ON`.
 - **When I would choose differently:** several app servers writing at the same time (the Phase 4 API under real load), or many concurrent users. SQLite allows only one writer at a time. Moving would mean changing the connection code and a few types, but the SQL in `queries.sql` is standard.
+
+### D19. Available units: calculated, not stored
+
+- **Problem:** "how many units of the Canon are free?" can be **stored** in an `items.available_units` column, or **calculated** as `total_units − (open rentals of that SKU)`.
+- **For storing it:**
+  - Reading is one column with no join, which is fastest for the catalogue page, which shows availability for every item on every visit.
+  - Renting can claim a unit atomically: `UPDATE items SET available_units = available_units - 1 WHERE sku = ? AND available_units > 0`. The database itself refuses to go below zero, even when two rent requests arrive together.
+- **For calculating it:**
+  - It is derived data: the open rentals already say how many units are out. A stored copy is a **second source of truth** that can disagree with the first. That is exactly the update anomaly normalisation removes. Every rent, return, undo and manual fix would have to update both, or the shop shows "1 available" when nothing is on the shelf.
+  - Phase 1 already works this way: availability is **rebuilt** from rentals with no return date.
+  - The spec's Q11 is literally "units available right now", computed from rentals.
+- **Chosen:** calculate it (`total_units − COUNT(open rentals)`), with an index on rentals so the count stays fast (Task 3.6).
+- **Two rent requests at the same moment:** with a calculated value, "check availability, then insert the rental" must be one transaction that **locks before reading**. In SQLite that is `BEGIN IMMEDIATE`, which takes the write lock first, so the second request waits, then sees the first rental and gets "No units available". Without the lock, both could read "1 free" and both insert.
+- **When I would denormalise (store it):** when reading availability is measured to be too slow, e.g. 10 million rentals and a catalogue page showing thousands of items. Then I'd store `available_units`, update it **in the same transaction** as every rental insert/return, add `CHECK (available_units BETWEEN 0 AND total_units)`, and keep a scheduled job that recalculates it from rentals and reports any difference.
