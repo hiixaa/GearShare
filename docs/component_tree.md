@@ -1,5 +1,8 @@
 # Phase 4: Component Tree and Where State Lives
 
+This is the React app's component tree. Next to each component I've noted the
+state it owns and the props it receives.
+
 ```
 main.jsx
 └─ App                                   routes (Task 4.5)
@@ -27,21 +30,22 @@ main.jsx
                   └─ "*"           NotFoundPage
 ```
 
-Shared by several screens: `StatusViews` (`Loading`, `ErrorState` with Retry, `Empty`).
+`StatusViews` (`Loading`, `ErrorState` with a Retry button, and `Empty`) is
+shared by every screen that loads data.
 
-## Who owns each piece of state, and why there
+## Who owns each piece of state, and why
 
 | State | Owner | Why there |
 |---|---|---|
-| Which customer am I | `CustomerProvider` (context) | Needed by the navbar, every add button, the basket and My rentals. Passing it as props would drill it through Layout → page → GearList → GearCard → GearActions. |
-| Basket items + message | `BasketProvider` (`useReducer`) | Needed by the navbar count, the cards, the details page and the basket page. A reducer keeps the ADD / REMOVE / CLEAR rules in one testable pure function. |
-| Search text, category, sort | **The URL** (`useSearchParams`) | Survives going to `/gear/:sku` and back ("Back to results"), a reload, and a shared link (D32). |
-| Debounced search text | `CataloguePage` (`useDebounce`) | Derived from the URL; only used to decide when to fetch. |
-| Loading / success / error + data for each fetch | The page, via `useApi(path)` | Each screen has its own request; `useApi` aborts the previous one when `path` changes. |
-| Form fields, touched fields | `AddItemPage` | Only that form uses them. The errors are **derived** with `validateItem(form)`, not stored, so they can't get out of date. |
-| Renting… / toasts | `BasketPage` | Only checkout uses them. |
-| "Joined the waiting list" message | `GearActions` | Belongs to one item's button. This is why the list's `key` must be the SKU. |
+| Who the current customer is | `CustomerProvider` (context) | The navbar, every add button, the basket and My rentals all need it. As props, it would have to be passed down through Layout → page → GearList → GearCard → GearActions. |
+| Basket items and message | `BasketProvider` (`useReducer`) | The navbar count, the cards, the details page and the basket page all need it. A reducer keeps the ADD / REMOVE / CLEAR rules in one pure function that's easy to test. |
+| Search text, category, sort | the URL (`useSearchParams`) | It survives opening an item and coming back ("Back to results"), a reload, and a shared link (D32). |
+| Debounced search text | `CataloguePage` (`useDebounce`) | Worked out from the URL, and only used to decide when to fetch. |
+| Loading / success / error, and the data, for each request | each page, through `useApi(path)` | Every screen makes its own request, and `useApi` cancels the old one when the path changes. |
+| Form fields and which ones were touched | `AddItemPage` | Only this form uses them. The error messages are worked out from the fields with `validateItem(form)` rather than stored, so they can never be out of date. |
+| "Renting..." and the toasts | `BasketPage` | Only checkout uses them. |
+| The "joined the waiting list" message | `GearActions` | It belongs to one item's button, which is why the list's `key` has to be the SKU and not the array index. |
 
-Components receive data **only through props** (`GearList`, `GearCard`,
-`AvailabilityBadge` know nothing about fetch or the API). Only `api.js` calls
-`fetch()`.
+Components get their data only through props: `GearList`, `GearCard` and
+`AvailabilityBadge` don't know anything about the API or where the data came
+from. `api.js` is the only file that calls `fetch()`.

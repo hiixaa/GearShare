@@ -17,6 +17,7 @@ Thumbs.db
 # Node (Phase 4)
 node_modules/
 dist/
+.vite/
 .env
 
 # Generated benchmark data (Phase 2)

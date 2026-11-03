@@ -1,6 +1,14 @@
 # Phase 1 Design: Class Diagram and CRC Cards
 
+I did this design before writing any Phase 1 code. Later phases added to it:
+Phase 2 added indexes and the undo stack inside `GearShare`, and Phase 3 added
+the `storage/` layer underneath it. The classes and their relationships below
+haven't changed.
+
 ## 1. Nouns and verbs from the Rulebook
+
+I went through the Rulebook and the order of checks, and pulled out the nouns
+(possible classes) and verbs (possible methods):
 
 | Nouns (candidate classes)                | Verbs (candidate methods)                       |
 |------------------------------------------|-------------------------------------------------|
@@ -10,10 +18,12 @@
 | fine, waiting list, SKU                  | check (limit, fines, duplicate, availability)   |
 | shop (the service)                       | list, search, report (overdue)                  |
 
-"Tier", "SKU", "due date" and "waiting list" are **attributes**, not classes:
-a tier is fully described by three numbers, so it becomes a `Customer` subclass.
+Not every noun deserved its own class. "SKU", "due date" and "waiting list"
+ended up as attributes. A tier is fully described by three numbers, so instead
+of a separate Tier class, each tier became a `Customer` subclass.
 
 ## 2. Class diagram
+
 
 ```mermaid
 classDiagram
@@ -105,19 +115,21 @@ classDiagram
     GearShare *-- Fine : owns many
 ```
 
-## 3. Inheritance or composition? (one sentence each)
+## 3. Inheritance or composition?
 
-| Relationship                          | Kind        | Why                                                                                         |
-|---------------------------------------|-------------|---------------------------------------------------------------------------------------------|
-| Equipment / Accessory / DisplayItem → GearItem | is-a (inheritance) | Each *is* a piece of gear with the same SKU, name and price, and only differs in how it answers "can I be rented / for how long / can I be extended". |
-| Basic / Plus / ProCustomer → Customer | is-a (inheritance) | Each *is* a customer with the same id, name and email, and only the three tier numbers differ. |
-| Rental → Customer, Rental → GearItem  | has-a (composition) | A rental is not a kind of customer or item; it *links* one customer to one item for a period. |
-| GearShare → items, customers, rentals, fines | has-a (composition) | The shop *holds* the collections and enforces rules across them; it is not itself an item or customer. |
-| Fine → Rental (by `rental_id`)        | has-a (reference)  | A fine belongs to exactly one rental, but a rental may have no fine, so it is kept as a separate record. |
+One sentence to defend each relationship:
 
-## 4. What each abstract class forces its subclasses to answer
+| Relationship | Kind | Why |
+|---|---|---|
+| Equipment / Accessory / DisplayItem → GearItem | is-a (inheritance) | They're all gear with a SKU, name and price; they only differ in whether they can be rented, for how long, and whether they can be extended. |
+| Basic / Plus / ProCustomer → Customer | is-a (inheritance) | They're all customers with an ID, name and email; only the three tier numbers differ. |
+| Rental → Customer, Rental → GearItem | has-a (composition) | A rental isn't a kind of customer or item; it links one customer to one item for a while. |
+| GearShare → items, customers, rentals, fines | has-a (composition) | The shop holds the collections and applies rules across them; it isn't an item or a customer itself. |
+| Fine → Rental (by `rental_id`) | has-a (reference) | A fine belongs to exactly one rental, but most rentals have no fine, so it's a separate record. |
 
-**`GearItem`** (abstract) — every item type must answer:
+## 4. What each abstract class makes its subclasses answer
+
+Every item type has to answer the same four questions, each in its own way:
 
 | Question                 | Equipment                  | Accessory        | DisplayItem  |
 |--------------------------|----------------------------|------------------|--------------|
@@ -126,7 +138,7 @@ classDiagram
 | `rental_days(customer)`  | `customer.rental_period()` | **2** (R2)       | 0 (never rented) |
 | `can_extend()` (R2)      | True                       | **False**        | False        |
 
-**`Customer`** (abstract) — every tier must answer:
+And every tier answers three:
 
 | Question               | Basic | Plus | Pro |
 |------------------------|-------|------|-----|
@@ -134,12 +146,14 @@ classDiagram
 | `rental_period()`      | 3     | 5    | 7   |
 | `late_fee_per_day()` (R5) | 50 | 100  | 150 |
 
-So "a display item cannot be rented" lives in `DisplayItem`, and "a Basic
-customer has a 3-day period" lives in `BasicCustomer`. `GearShare` never asks
-*which* tier or type an object is; it only calls these methods. That is why
-there is no `if tier == ...` anywhere.
+So the answer to "where does that knowledge live?" is: "a display item can't be
+rented" lives in `DisplayItem`, and "a Basic customer gets 3 days" lives in
+`BasicCustomer`. `GearShare` never asks what tier or type an object is; it just
+calls these methods. That's why there's no `if tier == ...` anywhere in the code.
 
 ## 5. CRC cards
+
+One card per class: what it's responsible for, and who it works with.
 
 | **GearItem** (abstract) | |
 |---|---|

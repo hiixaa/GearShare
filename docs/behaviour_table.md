@@ -1,13 +1,14 @@
-# Phase 4: Behaviour Table Checklist
+# Phase 4: Behaviour Table
 
-How to check: `python -m sql.setup_db`, start the API
-(`$env:TODAY="2026-11-03"; python -m uvicorn api.main:app --port 8000`) and
-the website (`cd web; npm run dev`), then open **http://localhost:5173**.
-Reset the database between runs with `python -m sql.setup_db`.
+This is the spec's behaviour table, which I used as my checklist for the
+website. To check it yourself: run `python -m sql.setup_db`, start the API
+(`$env:TODAY="2026-11-03"; python -m uvicorn api.main:app --port 8000`) and the
+website (`cd web; npm run dev`), then open **http://localhost:5173**. Run
+`python -m sql.setup_db` again between attempts to reset the data.
 
-- **Code** = how the code implements the row.
-- **Auto** = covered by an automated test.
-- **Browser** = checked by hand in the browser: all 16 rows passed (2026-11-03).
+The third column says how the code handles each row and which automated test
+covers it. I went through every row by hand in the browser on 2026-11-03, and
+all 16 passed.
 
 | Action | Expected result | Code / auto test | Browser |
 |---|---|---|---|
@@ -29,6 +30,7 @@ Reset the database between runs with `python -m sql.setup_db`.
 | Resize to 360 px wide | One column of cards, nothing cut off, no sideways scrolling | `grid-cols-1` below 640 px, wrapping navbar, `overflow-x: hidden`; table in `overflow-x-auto` | ✅ |
 
 ## Notes
-- Use `http://localhost:5173`, not `http://127.0.0.1:5173`. CORS allows only the `localhost` origin (D30).
-- Don't run the console (`main.py`) at the same time as the API (D26).
-- Race condition (Task 4.3): with DevTools → Network → "Slow 3G", type `d`, `dr`, `drone` quickly. Only the last request completes; the earlier ones show as **(canceled)**, so an old response can't overwrite a newer one.
+
+- Use `http://localhost:5173`, not `http://127.0.0.1:5173`. The API only accepts the `localhost` address (D30).
+- Don't run the console (`main.py`) and the API at the same time (D26).
+- To check the race condition from Task 4.3: in DevTools, set Network to "Slow 3G" and type "drone" quickly. Only the last request finishes; the earlier ones show as **(canceled)**, so an old response can never overwrite a newer one.

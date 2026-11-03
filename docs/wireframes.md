@@ -1,7 +1,7 @@
 # Phase 4: Wireframes (the five screens)
 
-The spec asks for these on paper first; they are drawn here in text.
-Every screen shares the same navbar:
+I sketched these before building the website. They're drawn in text here so
+they live in the repository. Every screen has the same navbar at the top:
 
 ```
 +----------------------------------------------------------------------+
