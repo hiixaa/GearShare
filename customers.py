@@ -1,7 +1,7 @@
 """Customers: an abstract Customer and one subclass per membership tier.
 
 Each tier answers the same three questions (item limit, rental period,
-late fee per day) with its own numbers. There is no `if tier == ...`.
+late fee per day) with its own numbers, so no code ever branches on the tier.
 """
 
 from abc import ABC, abstractmethod
