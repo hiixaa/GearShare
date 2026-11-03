@@ -301,3 +301,25 @@ Each entry: the problem, the options, what was chosen and why.
 - **Q12 gets no index.** Its cost is producing about 5 million item pairs, which no index can remove. At scale it should be a precomputed summary.
 - **Not created: `fines(paid)`.** It has 2 distinct values, and Q8 reads every fine anyway, so it would add write cost and save nothing.
 - **Cost of the chosen index:** it repeats 5 of the 7 rental columns, so it roughly doubles the storage for rentals, and every rental insert/return now updates it too. That's acceptable because the shop reads availability far more often than it writes rentals.
+
+### D26. The engine on the database: load once, write through, one transaction per operation
+
+- **Problem:** `GearShare` must read and write through the `storage/` classes instead of lists and CSV files, keep every message identical, and pass every Phase 1 and 2 test.
+- **Options:**
+  1. **Query the database for everything**: every `rent()` runs `SELECT`s for the customer, the item, the fines and availability. There are no in-memory collections at all.
+  2. **Load once, write through**: on start-up, load the shop from the database into objects. Every change is written to the database first, in a transaction, and then applied in memory.
+- **Chosen:** Option 2.
+- **Why:**
+  - The rules need **objects**: `customer.max_items()` and `item.rental_days(customer)` are the polymorphism from Phase 1, so rows would have to become objects on every call anyway.
+  - The Phase 2 indexes (`held_skus`, `open_rentals`, the `deque` waiting lists) keep every rule check O(1) without a round-trip to the database.
+  - All Phase 1 and 2 tests run unchanged, now on a real database.
+  - **The database is the source of truth.** Memory is only a copy made at start-up, and it is rebuilt from the database whenever they could disagree.
+- **How "one unit" is guaranteed:**
+  - `rent`, `return_item` and `extend` run inside the `@audit` decorator, which opens **one** transaction around the operation's writes **and** its audit row. `undo`, `join_waiting_list` and `add_item` open their own.
+  - `Database.transaction()` is a context manager. `BEGIN IMMEDIATE` on entry, `COMMIT` on success, `ROLLBACK` on any exception. Nested use joins the outer transaction.
+  - If the database refuses a write (`StorageError`), the transaction rolls back **and** `GearShare` reloads itself from the database, so memory can never keep a change the database rejected. Tested by forcing the audit insert to fail: the rental row is rolled back too, and memory agrees.
+  - Rule violations (R1–R10) are raised before anything is written, so they never open a write at all.
+- **Layers (the spec's hint):** `gearshare.py` contains neither `sqlite3` nor `SELECT`, and a test checks this. All SQL lives in `storage/`, always with `?` parameters, and a test checks that no `execute()` / `query()` there receives an f-string.
+- **`NullStorage`:** the Phase 2 benchmarks and demos still run in memory from generated CSV files (`load_data(folder)`). Instead of `if storage is None` checks in every method, they get a `NullStorage` with the same interface that saves nothing (the Null Object pattern).
+- **Trade-off:** with option 2, two programs writing to the same database at once would not see each other's changes until a reload. Fine for one console or one API process. A multi-process deployment would move availability checks into SQL (as in `tx_demo.sql`).
+- **Optional path not taken:** SQLAlchemy ORM. Plain DB-API keeps the SQL visible and is what the spec requires; an ORM would hide exactly the SQL this phase is about.

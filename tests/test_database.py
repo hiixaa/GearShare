@@ -23,12 +23,19 @@ def count(db, sql):
 
 # --- 3.4: counts after loading -----------------------------------------------------
 
-@pytest.mark.parametrize("table, expected", [
-    ("items", 7), ("tags", 10), ("customers", 5), ("rentals", 10),
-    ("fines", 4), ("categories", 8), ("membership_tiers", 3), ("item_tags", 11),
+@pytest.mark.parametrize("sql, expected", [
+    ("SELECT COUNT(*) FROM items", 7),
+    ("SELECT COUNT(*) FROM tags", 10),
+    ("SELECT COUNT(*) FROM customers", 5),
+    ("SELECT COUNT(*) FROM rentals", 10),
+    ("SELECT COUNT(*) FROM fines", 4),
+    ("SELECT COUNT(*) FROM categories", 8),
+    ("SELECT COUNT(*) FROM membership_tiers", 3),
+    ("SELECT COUNT(*) FROM item_tags", 11),
 ])
-def test_seed_counts(db, table, expected):
-    assert count(db, f"SELECT COUNT(*) FROM {table}") == expected  # table names are fixed above
+def test_seed_counts(db, sql, expected):
+    # Whole SQL strings, not f"... FROM {table}": no SQL is built by formatting.
+    assert count(db, sql) == expected
 
 
 def test_three_open_rentals(db):

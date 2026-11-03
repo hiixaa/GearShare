@@ -24,6 +24,18 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
+## Create the database (once)
+
+Since Phase 3, everything is saved in a SQLite database, `data/gearshare.db`.
+Create it (or reset it to the starter data at any time) with:
+
+```powershell
+python -m sql.setup_db
+```
+
+Always run the SQL scripts with `python -m ...` (not `python sql/...py`), and
+the tests with `python -m pytest`. See DECISIONS D22 for why.
+
 ## Run the console
 
 Every sample in the spec uses today = **2026-11-03**. Set it with the `TODAY`

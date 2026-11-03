@@ -1,13 +1,9 @@
 """Transcript tests: replay the spec's sample sessions through the real menu
 and compare the output line by line."""
 
-from pathlib import Path
-
 import pytest
 
 from main import Console, main
-
-DATA_DIR = Path(__file__).parent.parent / "data"
 
 SAMPLES = """
 # startup
@@ -222,10 +218,10 @@ def output_lines(capsys):
 SAMPLE_SESSIONS = parse_samples(SAMPLES)
 
 
-def test_startup_and_bad_menu_input(capsys):
+def test_startup_and_bad_menu_input(db_path, capsys):
     expected = SAMPLE_SESSIONS["startup"]
     main(read=make_reader(answers_from(expected)), env={"TODAY": "2026-11-03"},
-         data_dir=DATA_DIR)
+         db_path=db_path)
     assert output_lines(capsys) == expected
 
 
@@ -248,12 +244,56 @@ def test_bad_input_never_crashes(shop, today, capsys):
     assert out.count("Please enter a number from 0 to 9.") == 2
 
 
-def test_end_of_input_exits_cleanly(capsys):
+def test_end_of_input_exits_cleanly(db_path, capsys):
     def read(prompt):
         raise EOFError
-    assert main(read=read, env={"TODAY": "2026-11-03"}, data_dir=DATA_DIR) == 0
+    assert main(read=read, env={"TODAY": "2026-11-03"}, db_path=db_path) == 0
 
 
-def test_bad_today_is_reported(capsys):
-    assert main(read=None, env={"TODAY": "03-11-2026"}, data_dir=DATA_DIR) == 1
+def test_bad_today_is_reported(db_path, capsys):
+    assert main(read=None, env={"TODAY": "03-11-2026"}, db_path=db_path) == 1
     assert "TODAY must be a date like 2026-11-03" in capsys.readouterr().out
+
+
+def test_missing_database_is_reported(tmp_path, capsys):
+    assert main(read=None, env={"TODAY": "2026-11-03"},
+                db_path=tmp_path / "nothing.db") == 1
+    assert "python -m sql.setup_db" in capsys.readouterr().out
+
+
+# --- Phase 3.7 persistence check: close the program, open it again -------------------
+
+PERSISTENCE_RUN_1 = """
+> 3
+Customer ID: C001
+SKU: 1000000002
+OK: Ananya Nair rented 'Sony 50mm Lens'. Due 2026-11-06.
+> 0
+"""
+
+PERSISTENCE_RUN_2 = """
+> 7
+Customer ID: C001
+Rentals for Ananya Nair (Basic: 2 items, 3 days, ₹50/day)
+RENTAL  ITEM            ISSUED      DUE         STATUS
+RN011   Sony 50mm Lens  2026-11-03  2026-11-06  On rental
+Active rentals: 1 of 2
+Unpaid fines: ₹0
+> 0
+"""
+
+
+def run_program(db_path, transcript, capsys):
+    expected = [line for line in transcript.strip().splitlines()]
+    main(read=make_reader(answers_from(expected)), env={"TODAY": "2026-11-03"},
+         db_path=db_path)
+    out = output_lines(capsys)
+    return out[out.index("0. Exit") + 1:], expected
+
+
+def test_rental_survives_a_restart(db_path, capsys):
+    after_menu, expected = run_program(db_path, PERSISTENCE_RUN_1, capsys)
+    assert after_menu == expected
+    # A brand-new program run on the same database file:
+    after_menu, expected = run_program(db_path, PERSISTENCE_RUN_2, capsys)
+    assert after_menu == expected
