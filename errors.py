@@ -68,6 +68,12 @@ class ItemNotAvailableError(GearShareError):
     rule = "R7"
 
 
+class WaitingListError(GearShareError):
+    """R7: joining is pointless (a unit is free) or the customer is already in the list."""
+
+    rule = "R7"
+
+
 class ExtensionNotAllowedError(GearShareError):
     """Raised for R2 (accessory) or R6 (limit reached / someone waiting)."""
 

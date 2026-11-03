@@ -53,3 +53,31 @@ Each entry: the problem, the options, what was chosen and why.
 - **Options:** raise `ValueError` everywhere; create a custom error for every field; or reuse the spec's hierarchy where one fits.
 - **Chosen:** a bad SKU raises `InvalidSKUError` (R9 is a business rule with a fixed message in the spec). Blank names, a missing `@`, and negative units/prices/fines raise `ValueError`, which is Python's standard "bad value" error. I added **`RentalNotFoundError`** (a child of `GearShareError`) because the spec's list has no error for an unknown rental ID, and the menu must still print a clean `ERROR [RentalNotFoundError]: ...` instead of crashing.
 - **Why:** each error carries a `code` (the rule number or the class name), so the console's `ERROR [R3]: ...` and the Phase 4 API's `{"error": "R3"}` come from the same place.
+- **Later addition (Task 1.3):** `WaitingListError` (code `R7`) for joining a waiting list when a unit is actually free, or joining it twice.
+
+### D6. Which collection holds which data
+
+- **Problem:** `GearShare` looks things up on every rent, return and report, so the container decides the speed and the simplicity.
+- **Options considered:** lists for everything (simple, but every lookup is a scan) vs a container per access pattern.
+- **Chosen:**
+
+| Data | Collection | Why |
+|---|---|---|
+| `items` | `dict` SKU → `GearItem` | Every operation starts with "find the item for this SKU": O(1). Keys are unique, which matches R9. Insertion order keeps the catalogue in file order. |
+| `customers` | `dict` ID → `Customer` | Same: O(1) lookup by ID, with IDs unique. |
+| `rentals`, `fines` | `list` | Only appended, and read in order (RN001, RN002, ...). Nothing is looked up by position. |
+| `held_skus` | `dict` ID → `set` of SKUs | R8 becomes `sku in held` (O(1)), and because R8 allows only one unit per SKU, `len(held)` is exactly the R3 count. |
+| `waiting_lists` | `dict` SKU → `list` of IDs | Order matters (first come, first served, R7). Phase 2 replaces the list with a `deque`, because `list.pop(0)` is O(n). |
+| `audit_log` | `list` | Append-only history. |
+
+- **Known weakness:** finding a rental by ID scans the list (O(n)). That is acceptable for 10 rentals, and it is measured and improved in Phase 2.
+
+### D7. What "the first person in the list is served first" (R7) means
+
+- **Problem:** when a drone comes back and Meera is #1 on the waiting list, what stops Pooja (who is not first) from renting the free unit straight away?
+- **Options:**
+  1. Only print "Next on waiting list: Meera Joshi" and let anyone rent the unit.
+  2. Automatically create a rental for Meera.
+  3. Move Meera from the waiting list to a **reservation**: the unit is held for her, and only she can rent it.
+- **Chosen:** Option 3.
+- **Why:** option 1 breaks R7 (whoever rents first wins, not whoever waited first). Option 2 rents to Meera without asking her, and she might now break R3 or R4. With option 3, Meera still goes through all the rent checks, and nobody can jump the queue. A pending reservation also counts as "another customer is waiting" for R6, so the item can't be extended in the meantime.
