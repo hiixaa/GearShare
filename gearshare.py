@@ -23,7 +23,7 @@ from errors import (
     UnpaidFinesError,
     WaitingListError,
 )
-from items import ITEM_TYPES, validate_sku
+from items import item_from_row, validate_sku
 from rentals import Fine, Rental, parse_date
 
 FINE_LIMIT = 500  # R4: renting is blocked only when unpaid fines are ABOVE this
@@ -111,20 +111,10 @@ class GearShare:
 
     def _load_items(self, path):
         for line_no, row in enumerate(self._read_csv(path), start=2):
-            item_class = ITEM_TYPES[row["item_type"]]
-            item = item_class(
-                sku=row["sku"],
-                name=row["name"],
-                tags=[t.strip() for t in row["tags"].split(";") if t.strip()],
-                category=row["category"],
-                parent_category=row["parent_category"],
-                weight_g=row["weight_g"],
-                price=row["price"],
-                total_units=row["total_units"],
-            )
-            if item.sku in self.items:  # R9: a SKU identifies one item
-                raise ValueError(f"{path.name} line {line_no}: duplicate SKU {item.sku}.")
-            self.items[item.sku] = item
+            try:
+                self.add_item(item_from_row(row))
+            except ValueError as e:
+                raise ValueError(f"{path.name} line {line_no}: {e}") from None
 
     def _load_customers(self, path):
         for row in self._read_csv(path):
@@ -151,8 +141,15 @@ class GearShare:
             self._add_fine(Fine(row["rental_id"], row["amount"], paid))
 
     # ------------------------------------------------------------------ bookkeeping
-    # Every rental and fine goes through these two methods, so the list and
-    # the indexes can never disagree.
+    # Every item, rental and fine goes through these methods, so the
+    # collections and the indexes can never disagree.
+
+    def add_item(self, item):
+        """Add a new item to the catalogue. R9: a SKU identifies one item."""
+        if item.sku in self.items:
+            raise ValueError(f"duplicate SKU {item.sku} "
+                             f"(already used by '{self.items[item.sku].name}').")
+        self.items[item.sku] = item
 
     def _add_rental(self, rental):
         self.rentals.append(rental)

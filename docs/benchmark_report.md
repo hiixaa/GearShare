@@ -142,3 +142,39 @@ Top-level category A-Z, then weight heaviest first, then name A-Z, in one
 `sorted()` call with the key `(top_category, -weight_g, name)`. Negating the
 weight turns "descending" into "ascending", so one key does all three parts.
 See DECISIONS D10.
+
+---
+
+## 3. Hashing (Task 2.3)
+
+### 3.1 Big-O of each hashing task
+
+| Task | With hashing | Without hashing | Structure |
+|---|---|---|---|
+| Duplicate SKUs on import | O(n) | O(n²): compare each row with every earlier row | `set` of SKUs seen |
+| Group by tag | O(total tags) | O(tags × n): one scan per tag | `dict` tag → list |
+| Most rented | O(R + m log m), m = distinct items | O(R × m): count each item separately | `dict` SKU → count |
+| Packing challenge (two-sum) | O(n), one pass | O(n²): try every pair | `dict` weight → item |
+| Word search (stretch) | O(q + matches) per query, after an O(words) build | O(n) per query | `dict` word → `set` of SKUs |
+
+### 3.2 Stretch: word-to-SKU index vs linear search
+
+Reproduce: `python benchmarks/benchmark_word_index.py`. Query `"zhiyun drone"` (both words must match).
+
+| n | build_index_ms | linear_search_ms | index_search_ms | matches |
+|---|---|---|---|---|
+| 1,000 | 2.585 | 0.524 | 0.0075 | 11 |
+| 5,000 | 16.825 | 2.514 | 0.0058 | 38 |
+| 10,000 | 37.170 | 5.064 | 0.0107 | 80 |
+| 50,000 | 184.369 | 28.212 | 0.0990 | 394 |
+
+**Surprise: the index search still grows a little (0.006 → 0.099 ms).**
+The two dict lookups are O(1), but intersecting the two SKU sets and sorting
+the result are O(matches), and there are 394 matches at 50k against 11 at 1k.
+The cost now follows the size of the **answer**, not the size of the **shop**,
+which is exactly what an index is for.
+
+**The trade-off:** building the index costs about 184 ms at 50k (≈ 7 linear
+searches), plus memory for one set entry per word per item. It pays off for a
+catalogue that is searched far more often than it changes. Every `add_item`
+would also have to update the index. See DECISIONS D12.

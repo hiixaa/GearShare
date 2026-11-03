@@ -125,3 +125,19 @@ Each entry: the problem, the options, what was chosen and why.
 - **Problem:** should `bubble_sort(names)` sort `names` in place (like `list.sort()`) or return a new list (like `sorted()`)?
 - **Chosen:** each hand sort copies the input and returns the sorted copy.
 - **Why:** the benchmark sorts the *same* unsorted list several times. If the first run sorted it in place, every later run would sort already-sorted data, which is insertion and bubble sort's best case (O(n)). The median would then be a lie. The copy costs O(n), which is negligible next to O(n²).
+
+### D12. The word index stays a stretch tool, not the engine's search
+
+- **Problem:** `WordIndex` makes multi-word search about 285× faster at 50k items. Should `GearShare.search()` use it?
+- **Options:**
+  1. Replace `GearShare.search()` with the index.
+  2. Keep the substring search in the engine, and keep `WordIndex` as a separate, measured tool.
+- **Chosen:** Option 2, for now.
+- **Why:** the two return **different answers**. The engine matches substrings (`"dron"` finds "DJI Mini Drone"), while the index matches whole words only. Phase 1's behaviour and samples are the spec, so swapping silently would change results. The index would also need updating on every `add_item`. If the website's search ever becomes slow, the index is the measured fix, but it should be a deliberate feature change ("search by words"), not a hidden one.
+
+### D13. Packing challenge: what the dict stores
+
+- **Problem:** two-sum needs "have I already seen an item with weight X?" in O(1).
+- **Options:** a `set` of weights (answers yes/no only), or a `dict` weight → item.
+- **Chosen:** `dict` weight → **first** item seen with that weight (`setdefault`).
+- **Why:** the answer must name both items, so a set isn't enough. Checking `needed in seen` **before** adding the current item means an item can never pair with itself ("two different items"). Display items are skipped before anything is stored (R1). The result is O(n) time and O(n) space, instead of O(n²) time for trying every pair.
