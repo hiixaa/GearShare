@@ -1,0 +1,7 @@
+@import "tailwindcss";
+
+/* Never scroll sideways, even at 360 px wide. */
+html,
+body {
+  overflow-x: hidden;
+}
