@@ -5,7 +5,7 @@ A rental system for **FrameWorks Gear Rental**, built in four phases:
 | Phase | Topic         | Status      |
 |-------|---------------|-------------|
 | 1     | Python + OOP  | Done        |
-| 2     | DSA           | —           |
+| 2     | DSA           | Done        |
 | 3     | SQL           | —           |
 | 4     | React + API   | —           |
 
@@ -52,6 +52,31 @@ Each test loads a fresh copy of the starter data, so tests never depend on
 each other. `tests/test_main.py` replays every sample transcript from the spec
 through the real menu and compares the output line by line.
 
+## Phase 2: data structures, demos and benchmarks
+
+The menu gains **option 9 (Undo)**, which reverses the latest rent or return.
+
+Each `dsa/` module prints its part of the spec's Phase 2 sample:
+
+```powershell
+python -m dsa.search          # binary search with comparison counts
+python -m dsa.sorting         # bubble / insertion / selection passes + catalogue sort
+python -m dsa.hashing         # group by tag, most rented, packing challenge
+python -m dsa.history         # rental history linked lists
+python -m dsa.categories      # recursion warm-ups and the category tree
+python import_gear.py gear_with_duplicate.csv
+```
+
+Benchmarks (results and conclusions: [docs/benchmark_report.md](docs/benchmark_report.md)):
+
+```powershell
+python benchmarks/generate_data.py 10000      # fake shop of any size
+python benchmarks/benchmark_engine.py         # 2.1 engine operations, 1k-50k
+python benchmarks/benchmark_sorts.py          # 2.2 searches and sorts (~1 min)
+python benchmarks/benchmark_word_index.py     # 2.3 stretch: word index
+python benchmarks/benchmark_queue.py          # 2.4 list.pop(0) vs deque.popleft()
+```
+
 ## Project layout
 
 ```
@@ -61,8 +86,11 @@ items.py        GearItem (abstract) -> Equipment, Accessory, DisplayItem
 customers.py    Customer (abstract) -> BasicCustomer, PlusCustomer, ProCustomer
 rentals.py      Rental, Fine
 errors.py       GearShareError and its children
-data/           starter CSV files (gear, customers, rentals, fines)
-docs/           class diagram and CRC cards
+import_gear.py  import a gear CSV, skipping duplicate SKUs (Phase 2)
+dsa/            Phase 2: search, sorting, hashing, history, categories
+benchmarks/     Phase 2: fake-data generator and timing scripts
+data/           starter CSV files (+ gear_with_duplicate.csv)
+docs/           class diagram, CRC cards, benchmark report, test output
 tests/          pytest tests
 DECISIONS.md    design decision log
 ```

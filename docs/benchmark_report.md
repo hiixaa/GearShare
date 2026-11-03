@@ -220,3 +220,78 @@ dict or set operation, but removing the rental from the full `rentals` history
 list is a scan. It is still fast in practice, because the rental being undone
 is near the end of the list, but `list.remove` searches from the front. A
 dict-based history (as in Phase 3's database, with a primary key) removes it in O(1).
+
+---
+
+## 5. Recursion (Task 2.5)
+
+Reproduce the sample: `python -m dsa.categories`.
+
+### 5.1 Recursive vs iterative
+
+| Function | Recursive Big-O | Recursion depth | Iterative version |
+|---|---|---|---|
+| `factorial(n)` | O(n) time | n | a loop, O(1) space |
+| `fibonacci(n)` | **O(2ⁿ)** time | n | `fibonacci_iterative`: O(n) time, O(1) space |
+| `sum_of_digits(n)` | O(digits) | digits (≈ 10 for any int you'd use) | a loop |
+| `tree_lines` / `total_items` / `path_to` | O(nodes) | tree height | explicit stack: `tree_lines_iterative`, `total_items_iterative`, `path_to_iterative` |
+
+Naive Fibonacci measured on this machine: n = 20 → 3.5 ms, 25 → 23 ms,
+30 → 225 ms (about ×10 for every +5, since 1.6⁵ ≈ 11). The iterative version stayed under 0.1 ms.
+
+### 5.2 Depth 10,000: what `sys.setrecursionlimit` changes and doesn't (measured)
+
+A chain of 10,000 categories, each the only child of the previous one:
+
+| Function | Limit | Depth | Result |
+|---|---|---|---|
+| `path_to` (plain Python calls) | 1,000 (default) | 10,000 | `RecursionError: maximum recursion depth exceeded` |
+| `path_to` | 20,000 | 10,000 | works |
+| `path_to` | 1,000,000 | 200,000 | works, but slowly (it copies the path at every level: O(depth²)) |
+| `total_items` (recursion **through** C's `sum()`) | 20,000 | 10,000 | `RecursionError: Stack overflow (used 2914 kB)` |
+| any `*_iterative` | 1,000 (default) | 10,000 | works |
+
+**What `setrecursionlimit` changes:** only Python's own safety counter, the
+number of Python frames it allows before raising `RecursionError`.
+
+**What it does not fix:**
+1. The real **C stack** of the process (about 1-8 MB, set by the operating
+   system). Python 3.14 runs plain Python-to-Python calls without using the
+   C stack, so `path_to` survived once the counter was raised. But
+   `total_items` calls itself *through* `sum()` and a generator, which are C
+   code, so every level also takes C stack. It overflowed at depth 10,000
+   even with the limit at 20,000. On older Pythons, or in other code paths,
+   this is a hard crash.
+2. Speed and memory: every frame still costs memory, and a deep recursion
+   that copies data (like `path_to`'s list) gets slower with each level.
+
+**Which is clearer?** The recursive versions. `path_to` reads like its
+definition: "the path to X is my name plus my child's path to X". The
+iterative version has to carry the path on its own stack.
+**Which at depth 10,000?** The iterative one. Its only limit is memory.
+
+### 5.3 Where recursion is the wrong choice (think-about question 4)
+
+- **`fibonacci`**: the worst choice. Two calls per call means the same values
+  are recomputed exponentially often (`fibonacci(30)` makes about 1.6 million
+  calls to produce one number). Use the loop, or memoisation.
+- **`factorial`**: works, but the depth equals n, so `factorial(5000)` fails
+  at the default limit, while a loop never would. Nothing is gained by recursion.
+- **`sum_of_digits`** and the **category tree**: good fits. The depth is tiny
+  (number of digits, tree height ≈ 3), and the tree is recursive by nature,
+  since every category is a smaller tree.
+
+---
+
+## 6. Conclusions
+
+1. **Measure before optimising.** The biggest slowdown (`rent`, 2.1) was in
+   a method that *looked* O(1). Only the numbers showed it.
+2. **Hashing turned most O(n) and O(n²) work into O(1) lookups:** indexes for
+   rent/return, sets for duplicates, a dict for two-sum, and the word index for search.
+3. **The right container matters more than clever code:** `deque.popleft()`
+   vs `list.pop(0)` was 155× at 100k, with the same one-line call.
+4. **Big-O hides constants:** all three hand sorts are O(n²), but bubble was
+   2× slower than insertion, and Python's C-coded `sorted()` was about 1,600× faster at 10k.
+5. **Recursion is for problems that are naturally recursive and shallow.**
+   For deep or repetitive ones, use a loop or an explicit stack.

@@ -168,3 +168,15 @@ Each entry: the problem, the options, what was chosen and why.
 - **Problem:** the spec says the menu "gains option 9 (undo)", but the Phase 1 start-up sample shows the menu ending at 8, with "Please enter a number from 0 to 8."
 - **Chosen:** the menu now lists `9. Undo`, and the error says "0 to 9". The highest number is computed from the options dict, not hard-coded. The start-up transcript test was updated for exactly these two lines. Every other Phase 1 sample is unchanged and still passes.
 - **Why:** the Phase 2 spec explicitly extends the menu, and a prompt saying "0 to 8" while 9 works would be a bug.
+
+### D17. Recursive tree functions, with iterative versions kept alongside
+
+- **Problem:** the category tree (Gear Hub → Photography → Cameras) needs print, count and path. Recursion is the natural fit, but it has a depth limit.
+- **Options:**
+  1. Recursive only.
+  2. Iterative only (explicit stack).
+  3. Recursive as the main version (readable), plus iterative versions, tested to give identical results.
+- **Chosen:** Option 3.
+- **Why:** the shop's real tree is 3 levels deep, where recursion is the clearest code and the depth limit is irrelevant. The iterative versions prove the same results can be produced without the call stack, and a test shows they survive a 10,000-level tree where the recursive one raises `RecursionError`.
+- **Rejected:** "just raise `sys.setrecursionlimit`". Measured on Python 3.14: it let plain-Python `path_to` reach depth 200,000, but `total_items` (which recurses through C's `sum()`) still overflowed the real C stack at depth 10,000 with the limit at 20,000. The limit is a safety counter, not more stack.
+- **Tree order:** children are kept sorted by name, so `print_tree` output is the same however the items were loaded.
