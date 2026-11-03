@@ -81,3 +81,13 @@ Each entry: the problem, the options, what was chosen and why.
   3. Move Meera from the waiting list to a **reservation**: the unit is held for her, and only she can rent it.
 - **Chosen:** Option 3.
 - **Why:** option 1 breaks R7 (whoever rents first wins, not whoever waited first). Option 2 rents to Meera without asking her, and she might now break R3 or R4. With option 3, Meera still goes through all the rent checks, and nobody can jump the queue. A pending reservation also counts as "another customer is waiting" for R6, so the item can't be extended in the meantime.
+
+### D8. The audit log: a decorator, using the real clock
+
+- **Problem:** every successful rent, return and extend must be recorded, and a failed one must not be.
+- **Options:**
+  1. Call `self.audit_log.append(...)` at the end of each of the three methods.
+  2. A decorator `@audit` wrapped around them.
+- **Chosen:** Option 2.
+- **Why:** the logging code is written once, and the business methods stay about business rules. "Only on success" comes for free: if the method raises, the line after the call is never reached.
+- **Time stamp:** the audit entry uses `datetime.now()`, not the `today` parameter. `today` is the *business* date that the rules are calculated from (and can be faked with `TODAY=`), while the audit log answers "when did a staff member actually do this?". Keeping the two separate means a test run with `TODAY=2026-11-03` still records when it really happened.

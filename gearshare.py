@@ -5,8 +5,9 @@ calling date.today(), so tests can choose the date.
 """
 
 import csv
+import functools
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from customers import TIER_CLASSES
@@ -31,6 +32,28 @@ FINE_LIMIT = 500  # R4: renting is blocked only when unpaid fines are ABOVE this
 def rupees(amount):
     """Money is written like ₹100 with no decimals."""
     return f"₹{amount}"
+
+
+def audit(method):
+    """Decorator: after a successful rent / return_item / extend, append
+    time, action, customer and item to the service's audit_log.
+
+    If the method raises, nothing is logged: the exception passes straight
+    through, because the append line is never reached.
+    """
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        result = method(self, *args, **kwargs)
+        rental = getattr(result, "rental", result)  # ReturnReceipt or Rental
+        self.audit_log.append({
+            "time": datetime.now().isoformat(timespec="seconds"),
+            "action": method.__name__,
+            "customer": rental.customer.customer_id,
+            "item": rental.item.sku,
+            "rental_id": rental.rental_id,
+        })
+        return result
+    return wrapper
 
 
 @dataclass
@@ -175,6 +198,7 @@ class GearShare:
 
     # ------------------------------------------------------------------ rent
 
+    @audit
     def rent(self, customer_id, sku, today):
         """Rent one unit. Checks run in the Rulebook's fixed order; the first
         broken rule is the one reported."""
@@ -224,6 +248,7 @@ class GearShare:
 
     # ------------------------------------------------------------------ return
 
+    @audit
     def return_item(self, rental_id, today):
         rental = self.get_open_rental(rental_id)
         days_late = rental.days_late(today)
@@ -246,6 +271,7 @@ class GearShare:
 
     # ------------------------------------------------------------------ extend
 
+    @audit
     def extend(self, rental_id, today):
         rental = self.get_open_rental(rental_id)
         item = rental.item
@@ -292,13 +318,35 @@ class GearShare:
         return [r for r in self.rentals
                 if r.customer is customer and r.is_open()]
 
-    def overdue_report(self, today):
-        """Open rentals past their due date: (rental, days late, fine so far),
-        most days late first. 'Fine so far' is not saved until the return."""
-        rows = []
+    def iter_overdue(self, today):
+        """Generator: yield overdue rentals one at a time, without building
+        a list first."""
         for rental in self.rentals:
             if rental.is_overdue(today):
-                rows.append((rental, rental.days_late(today), rental.late_fee(today)))
-        rows.sort(key=lambda row: row[1], reverse=True)
-        return rows
+                yield rental
+
+    def overdue_report(self, today):
+        """Open rentals past their due date as (rental, days late, fine so far),
+        most days late first (ties by rental ID).
+        'Fine so far' is not saved: it becomes a real fine only on return."""
+        rows = [(r, r.days_late(today), r.late_fee(today))
+                for r in self.iter_overdue(today)]
+        return sorted(rows, key=lambda row: (-row[1], row[0].rental_id))
+
+    def items_by_category(self):
+        """{category: [items sorted by name]}, categories in A-Z order."""
+        categories = sorted({item.category for item in self.items.values()})
+        return {
+            category: sorted(
+                (item for item in self.items.values() if item.category == category),
+                key=lambda item: item.name)
+            for category in categories
+        }
+
+    def customers_with_unpaid_fines(self):
+        """[(customer, amount owed)], largest amount first, ties by name."""
+        owed = map(lambda c: (c, self.unpaid_fines(c.customer_id)),
+                   self.customers.values())
+        debtors = filter(lambda pair: pair[1] > 0, owed)
+        return sorted(debtors, key=lambda pair: (-pair[1], pair[0].name))
 
