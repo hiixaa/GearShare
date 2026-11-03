@@ -265,3 +265,23 @@ Each entry: the problem, the options, what was chosen and why.
 - **Chosen:** Option 3. It works here and on any normal machine, and keeps the spec's file names.
 - **Consequence for Part B (3.7):** `python main.py` is started as a script, so it must **not** read `schema.sql` at start-up. The database is created once by a `-m` command (`python -m sql.setup_db`), and the engine only opens it.
 - **Consequence for tests:** run them with `python -m pytest` (as the README says). The `pytest.exe` launcher counts as a script, so the database tests fail with the same `PermissionError` when it is used.
+
+### D23. Q11 and the display item: "available" means "on the shelf"
+
+- **Problem:** Q11 "units available right now" shows the Vintage Leica (Showcase) with **1** available, but R1 says it can never be rented. Is 1 a wrong answer?
+- **Options:**
+  1. Show 1: the unit is physically in the shop (`total_units − open rentals`).
+  2. Show 0 for display items (`CASE WHEN item_type = 'Display' THEN 0 ...`).
+  3. Leave display items out of Q11 (`WHERE item_type <> 'Display'`).
+- **Chosen:** Option 1, matching the spec's expected output.
+- **Why:** Q11 answers one question, "how many units are not out on rental?", and that is the same calculation for every item. Whether an item **may** be rented is a different fact, already stored in `item_type` and enforced by `DisplayItem.is_rentable()` (R1). Mixing the two into one number would hide which fact caused a 0: is the Leica out on rental, or not for rent? It's the same split the console already makes: the catalogue prints `not rentable` for the Leica instead of a number, based on the item type, not on the count.
+- **When I'd change it:** a page that only asks "what can I rent now?" (like the website's catalogue filter) should use option 3, or add a separate `rentable` column, rather than redefining "available".
+
+### D24. Join choices in the query pack
+
+- **Problem:** each of the 12 queries needs a join type, and the wrong one silently drops or adds rows.
+- **Rule used:** `INNER JOIN` when every row we want **has** a match (a rental always has a customer and an item). `LEFT JOIN` when the rows we want are exactly the ones **without** a match (Q5: never rented; Q6: no recent rental; Q11: items with no open rental still need a row).
+- **Two traps avoided:**
+  - **Q6, filter in `ON`, not `WHERE`:** `LEFT JOIN rentals ... WHERE r.issue_date >= '2026-08-05'` would discard the NULL rows and quietly behave like an INNER JOIN, losing Pooja (who has never rented). The date filter belongs in the `ON` clause.
+  - **Q11, `COUNT(r.rental_id)`, not `COUNT(*)`:** after a LEFT JOIN, an item with no open rentals still produces one row (of NULLs). `COUNT(*)` counts that row as 1, which would make the SD card show 2 instead of 3. `COUNT(column)` skips NULLs.
+- **Q12** uses a **self-join** (a table joined to itself on the same customer), with `a.name < b.name` so each pair appears once and an item never pairs with itself.

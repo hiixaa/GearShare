@@ -9,7 +9,7 @@ written in the file behave exactly as written. A failing statement prints
 'ERROR: ...' and the script carries on (like the sqlite3 shell), which the
 transaction demo relies on.
 
-For each SELECT, the last '-- ' comment line above it is printed as a title.
+For each SELECT, the first '-- ' comment line of the block above it is printed as a title.
 """
 
 import argparse
@@ -29,8 +29,11 @@ def split_statements(sql):
         stripped = line.strip()
         if not buffer.strip() and stripped.startswith("--"):
             text = stripped.lstrip("-").strip()
-            if text:
+            if text and title is None:      # first comment line = the title
                 title = text
+            continue
+        if not buffer.strip() and not stripped:
+            title = None                    # a blank line starts a new comment block
             continue
         buffer += line
         if sqlite3.complete_statement(buffer):

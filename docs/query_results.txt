@@ -1,0 +1,68 @@
+﻿Q1  Items tagged 'photo', with all their tags
+name           | tag
+Canon EOS 200D | dslr
+Canon EOS 200D | photo
+Sony 50mm Lens | lens
+Sony 50mm Lens | photo
+
+Q2  Items currently on rental, and who has them
+rental_id | customer    | item
+RN001     | Vikram Shah | DJI Mini Drone
+RN002     | Rohan Das   | Canon EOS 200D
+RN003     | Meera Joshi | Manfrotto Tripod
+
+Q3  Overdue rentals with days overdue
+customer    | item           | due_date   | days_overdue
+Vikram Shah | DJI Mini Drone | 2026-10-29 | 5
+Rohan Das   | Canon EOS 200D | 2026-10-31 | 3
+
+Q4  Top 3 items by number of rentals (ties broken by name)
+item              | rentals
+Canon EOS 200D    | 3
+DJI Mini Drone    | 2
+Rode Wireless Mic | 2
+
+Q5  Items that have never been rented
+name
+Vintage Leica (Showcase)
+
+Q6  Customers with no rental in the last 90 days (since 2026-08-05)
+name
+Pooja Menon
+
+Q7  Total fines per tier per month (month the item was returned)
+tier  | month   | total_fines
+Basic | 2026-07 | 600
+Basic | 2026-08 | 600
+Plus  | 2026-06 | 300
+
+Q8  Fines paid vs pending
+status  | total
+Paid    | 900
+Pending | 600
+
+Q9  Customers who rented from at least 3 different categories
+name        | categories
+Vikram Shah | 3
+
+Q10 Categories where the average completed rental lasts more than 4 days
+category    | avg_days
+Accessories | 22.0
+Audio       | 10.0
+Cameras     | 5.5
+Drones      | 5.0
+
+Q11 Units available right now, per item
+name                     | available
+Canon EOS 200D           | 1
+Sony 50mm Lens           | 1
+DJI Mini Drone           | 0
+Manfrotto Tripod         | 1
+Rode Wireless Mic        | 1
+Vintage Leica (Showcase) | 1
+SD Card 128GB            | 3
+
+Q12 The pair of items most often rented by the same customer
+item_a         | item_b            | customers
+Canon EOS 200D | Rode Wireless Mic | 2
+
