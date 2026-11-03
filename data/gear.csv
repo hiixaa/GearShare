@@ -1,0 +1,8 @@
+sku,name,tags,category,parent_category,item_type,weight_g,price,total_units
+1000000001,Canon EOS 200D,photo;dslr,Cameras,Photography,Equipment,450,45000,2
+1000000002,Sony 50mm Lens,photo;lens,Lenses,Photography,Equipment,280,18000,1
+1000000003,DJI Mini Drone,video;aerial,Drones,,Equipment,249,38000,1
+1000000004,Manfrotto Tripod,support,Tripods,,Equipment,1200,6000,2
+1000000005,Rode Wireless Mic,audio;interview,Audio,,Equipment,120,22000,1
+1000000006,Vintage Leica (Showcase),display,Showcase,,Display,600,150000,1
+1000000007,SD Card 128GB,storage,Accessories,,Accessory,2,600,3
