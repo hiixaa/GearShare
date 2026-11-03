@@ -1,0 +1,26 @@
+﻿(7 items in the table)
+
+search_unsafe("Drone")         -> 1 row
+search_unsafe("' OR '1'='1")   -> 7 rows     (every item leaked)
+search_safe("' OR '1'='1")     -> 0 rows
+search_safe("Drone")           -> 1 row
+
+What the database actually received:
+
+search_unsafe('Drone')
+  SQL : SELECT name FROM items WHERE name LIKE '%Drone%'
+  rows: ['DJI Mini Drone']
+
+search_unsafe("' OR '1'='1")
+  SQL : SELECT name FROM items WHERE name LIKE '%' OR '1'='1%'
+  rows: ['Canon EOS 200D', 'Sony 50mm Lens', 'DJI Mini Drone', 'Manfrotto Tripod', 'Rode Wireless Mic', 'Vintage Leica (Showcase)', 'SD Card 128GB']
+
+search_safe("' OR '1'='1")
+  SQL : SELECT name FROM items WHERE name LIKE '%' || ? || '%'
+  data: "' OR '1'='1"   <- sent separately, never parsed as SQL
+  rows: []
+
+search_safe('Drone')
+  SQL : SELECT name FROM items WHERE name LIKE '%' || ? || '%'
+  data: 'Drone'   <- sent separately, never parsed as SQL
+  rows: ['DJI Mini Drone']

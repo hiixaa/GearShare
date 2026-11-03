@@ -323,3 +323,23 @@ Each entry: the problem, the options, what was chosen and why.
 - **`NullStorage`:** the Phase 2 benchmarks and demos still run in memory from generated CSV files (`load_data(folder)`). Instead of `if storage is None` checks in every method, they get a `NullStorage` with the same interface that saves nothing (the Null Object pattern).
 - **Trade-off:** with option 2, two programs writing to the same database at once would not see each other's changes until a reload. Fine for one console or one API process. A multi-process deployment would move availability checks into SQL (as in `tx_demo.sql`).
 - **Optional path not taken:** SQLAlchemy ORM. Plain DB-API keeps the SQL visible and is what the spec requires; an ORM would hide exactly the SQL this phase is about.
+
+### D27. Parameterised queries everywhere (the injection experiment)
+
+- **Problem:** search text comes from users. How does it reach the database?
+- **Evidence** (`python -m sql.injection_demo`, also `tests/test_injection.py`):
+
+| Call | Rows |
+|---|---|
+| `search_unsafe("Drone")` | 1 |
+| `search_unsafe("' OR '1'='1")` | **7: every item leaked** |
+| `search_safe("' OR '1'='1")` | 0 |
+| `search_safe("Drone")` | 1 |
+
+- **What the f-string version did:** it pasted the text **into the SQL code**:
+  `SELECT name FROM items WHERE name LIKE '%' OR '1'='1%'`.
+  The attacker's first `'` **closed the string literal early**, so the database parsed the rest as SQL. `name LIKE '%'` is true for every row. The user's text changed the *structure* of the query, not just a value in it. With a different payload, the same hole could read other tables (`' UNION SELECT email FROM customers --`).
+- **What the parameterised query did differently (think-about question 4):** the SQL text is fixed, `... LIKE '%' || ? || '%'`, and the database **parses it before it ever sees the user's text**. The text is then sent separately, as a value that fills the `?` slot. It can only ever be data, never code. So `' OR '1'='1` is searched for literally, as a strange name, and matches nothing. Escaping quotes by hand is not the fix: it is easy to miss one case, and placeholders make the mistake impossible.
+- **Chosen rule:** every query in the program uses `?` placeholders (`storage/`, the tests and the benchmark scripts). The **only** SQL built by string formatting is `search_unsafe()` in `sql/injection_demo.py`, a throwaway file that nothing imports. A test checks that no `execute()` / `query()` in `storage/` receives an f-string.
+- **One documented exception, not user input:** `sql/index_report.py` runs `"EXPLAIN QUERY PLAN " + sql`, where `sql` is one of our own 12 queries read from `queries.sql`. `EXPLAIN` wraps a whole statement, so it can't be a `?` value. No user text is ever involved, so there is nothing to inject. (Found by searching the whole project for SQL built from pieces.)
+- **Where the rule doesn't apply:** `?` can stand for a **value** only, not for a table or column name. Where the SQL itself must vary (the test of row counts per table), the full SQL strings are written out as constants, not assembled from pieces.
