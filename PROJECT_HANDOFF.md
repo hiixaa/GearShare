@@ -7,14 +7,134 @@ without the previous conversation. Written 2026-11-03, at the start of Phase 4.
 
 | Item | Status |
 |---|---|
-| Git branch | `phase-4` (clean, created from `main`) |
+| Git branch | `phase-4` |
 | Tags | `phase-1`, `phase-2`, `phase-3` (each = a merge commit on `main`) |
-| Tests | **208 passed** (`python -m pytest -q`) |
+| Tests | **228 passed** (`python -m pytest -q`): 208 from Phases 1-3 + 20 API tests |
 | Phases 1-3 | Done, merged, tagged |
-| Phase 4 (React + API, 30 marks) | **Not started.** No `api/` or `web/` folder yet |
+| Phase 4 (React + API, 30 marks) | **Code complete.** API + website built and tested. Remaining: commits, browser check, screenshots, merge + tag (progress log below) |
 | Node.js / npm | Installed: v24.22.1 / 11.19.1 |
-| FastAPI / uvicorn / httpx | **Not installed yet** (only `pytest` is in the venv) |
-| Decisions logged | D1-D27 in `DECISIONS.md` |
+| FastAPI / uvicorn / httpx | Installed (0.162 / 0.54 / 0.28) and listed in `requirements.txt` |
+| Decisions logged | D1-D33 in `DECISIONS.md` (D28-D33 = Phase 4) |
+| Web tests | **8 passed** (`cd web; npm test`); `npm run build` succeeds |
+
+## ★ Phase 4 progress log (kept up to date while working)
+
+| Task | Status | Files | Commit (the user runs it) |
+|---|---|---|---|
+| 4.0 API | ✅ **Done.** 20 tests, live server checked | `api/__init__.py`, `api/main.py`, `api/errors.py`, `api/schemas.py`, `tests/test_api.py`, `requirements.txt`, DECISIONS D28-D30 | ⏳ **not committed yet**: see "Pending commits" |
+| 4.1 Vite app (written by hand, no prompts) | ✅ code done | `web/package.json`, `web/vite.config.js`, `web/index.html`, `web/.env.example`, `web/src/main.jsx`, `web/src/index.css`, `web/src/api.js` | ⏳ |
+| 4.1 wireframes + component tree docs | ✅ | `docs/wireframes.md`, `docs/component_tree.md` | ⏳ |
+| 4.2 Components | ✅ | `web/src/components/` (Layout, Navbar, GearCard, GearList, AvailabilityBadge, GearActions, StatusViews) | ⏳ |
+| 4.3 Live data, debounce, AbortController | ✅ | `web/src/hooks/useApi.js`, `useDebounce.js`, `pages/CataloguePage.jsx` | ⏳ |
+| 4.4 States + Add item form | ✅ | `components/StatusViews.jsx`, `pages/AddItemPage.jsx`, `lib/validateItem.js` | ⏳ |
+| 4.5 Routing | ✅ | `web/src/App.jsx`, `pages/GearDetailsPage.jsx` (Back to results), `pages/NotFoundPage.jsx` | ⏳ |
+| 4.6 Context + basket reducer + checkout | ✅ | `context/CustomerContext.jsx`, `context/BasketContext.jsx`, `lib/basketReducer.js`, `pages/BasketPage.jsx`, `pages/MyRentalsPage.jsx` | ⏳ |
+| 4.7 Tailwind, 360 px, accessibility | ✅ in the code (Tailwind v4, `grid-cols-1` on mobile, labels, focus outlines) | | ⏳ |
+| Web unit tests | ✅ **8 passed** (`cd web; npm test`), and `npm run build` succeeds | `web/src/lib/logic.test.js` | ⏳ |
+| Behaviour-table checklist written | ✅ | `docs/behaviour_table.md` (every row mapped to code + automated test) | ⏳ |
+| DECISIONS D31-D33 (Tailwind vs MUI, search in the URL, think-about answers) | ✅ | `DECISIONS.md` | ⏳ |
+| README Phase 4 section (how to start both) | ✅ | `README.md` | ⏳ |
+| End-to-end smoke test (API + Vite together, CORS, R4 error) | ✅ passed | | |
+| **Manual browser check: tick every row** | ☐ **the user, in a browser** | `docs/behaviour_table.md` ("Browser" column) | |
+| **Screenshots of the 5 screens** incl. loading / empty / error | ☐ **the user** | `docs/screenshots/` | |
+| Save the pytest output, merge `phase-4` into `main`, tag `phase-4` | ☐ **the user** | `docs/pytest_phase4.txt` | |
+
+### ▶ Exactly what remains (in order)
+
+1. **Commit the work** (the user, on `phase-4`). The commands are below, one per task.
+2. **Browser check:** start both servers (see "Run the full stack"), go through `docs/behaviour_table.md` row by row, and change ☐ to ✅. If a row fails, fix it, then note it in the table.
+3. **Screenshots** into `docs/screenshots/`: catalogue (loading, results, `zzz` empty, API down + Retry), details (Sony, Drone, Leica), basket (full message, Renting..., toast, Rohan's red error), My rentals (Vikram OVERDUE), Add item (SKU error, success), 404, and 360 px width. Or a 2-minute screen recording.
+4. `python -m pytest -v | Out-File -Encoding utf8 docs/pytest_phase4.txt`, then commit it.
+5. Merge and tag: `git checkout main`, `git merge --no-ff phase-4 -m "Merge Phase 4: React + API"`, `git tag -a phase-4 -m "Phase 4 complete: React + API"`.
+6. README: the Phase 4 status row now says "Done" (the user confirmed the website works end to end).
+7. **Push to GitHub** (no remote yet): create an EMPTY repo on github.com (no README, no .gitignore), then `git remote add origin https://github.com/<user>/Mini-GearShare.git`, `git push -u origin main`, `git push origin phase-1 phase-2 phase-3 phase-4`, `git push origin --tags`.
+
+**Ideas, if there is time (not required by the spec):**
+- React component tests (`@testing-library/react` + `jsdom`) for `CataloguePage`'s loading, empty and error states.
+- A "Pay fine" endpoint (no rule needs it).
+
+**Installed web packages:** react 19.3, react-dom 19.3, react-router-dom 7.18,
+vite 7.3, @vitejs/plugin-react 5.2, tailwindcss 4.3 + @tailwindcss/vite 4.3,
+vitest 3.2 (`web/node_modules`, git-ignored).
+
+**Run the full stack** (two terminals, project root, venv active):
+```powershell
+# terminal 1: API
+python -m sql.setup_db
+$env:TODAY="2026-11-03"; python -m uvicorn api.main:app --reload --port 8000
+```
+```powershell
+# terminal 2: website
+cd web
+npm run dev          # http://localhost:5173 (use localhost, NOT 127.0.0.1: CORS allows only localhost:5173)
+```
+
+**Pending commits** (the user runs these on `phase-4`, one block at a time, in this order; one commit per task as the spec asks):
+```powershell
+git add api/ tests/test_api.py requirements.txt
+```
+```powershell
+git commit -m "4.0: FastAPI layer over GearShare with exception-to-HTTP mapping and API tests"
+```
+```powershell
+git add web/package.json web/package-lock.json web/vite.config.js web/index.html web/.env.example web/src/main.jsx web/src/index.css web/src/api.js docs/wireframes.md docs/component_tree.md
+```
+```powershell
+git commit -m "4.1: Vite React app, API client, wireframes and component tree"
+```
+```powershell
+git add web/src/components/
+```
+```powershell
+git commit -m "4.2: Layout, Navbar, GearCard, GearList, AvailabilityBadge, GearActions, status views"
+```
+```powershell
+git add web/src/hooks/ web/src/pages/CataloguePage.jsx
+```
+```powershell
+git commit -m "4.3: Catalogue with URL search state, debounce and AbortController"
+```
+```powershell
+git add web/src/lib/validateItem.js web/src/pages/AddItemPage.jsx
+```
+```powershell
+git commit -m "4.4: Add item form with controlled inputs and validation"
+```
+```powershell
+git add web/src/App.jsx web/src/pages/GearDetailsPage.jsx web/src/pages/NotFoundPage.jsx
+```
+```powershell
+git commit -m "4.5: Routes, item details with Back to results, 404 page"
+```
+```powershell
+git add web/src/context/ web/src/lib/basketReducer.js web/src/lib/logic.test.js web/src/pages/BasketPage.jsx web/src/pages/MyRentalsPage.jsx
+```
+```powershell
+git commit -m "4.6: CustomerContext, basket useReducer with tier limit, checkout and My rentals"
+```
+```powershell
+git add DECISIONS.md README.md docs/behaviour_table.md PROJECT_HANDOFF.md
+```
+```powershell
+git commit -m "4.7: Tailwind styling notes, D28-D33, README Phase 4, behaviour table checklist"
+```
+(4.2-4.6 were written together, so the components already import each other. Each commit is a logical slice, and the app builds after the last one.)
+
+**What 4.0 built (for a new session):**
+- `create_app(db_path=None, today=None, web_origin=None)` in `api/main.py`, plus a module-level `app`.
+- The lifespan opens `Storage`, then `GearShare`, then `load_data()`. **All endpoints are `async def`** (D29).
+- Endpoints:
+  - `GET /gear?q=&category=&sort=name|catalogue|weight` (exactly the spec's 8 fields)
+  - `GET /gear/{sku}` (+ `price`, `top_category`)
+  - `GET /categories`
+  - `POST /gear` (201; 409 `R9` on a duplicate SKU; 422 `ValidationError`)
+  - `GET /customers` → `[{customer_id, name, membership_type, max_items}]`
+  - `GET /customers/{id}/rentals`
+  - `POST /rentals` (201)
+  - `POST /rentals/{id}/return`
+  - `POST /waiting-list` (201 `{position, message}`)
+- **Every error body is `{"error", "message"}`**, including FastAPI's validation errors.
+- Start it with: `python -m sql.setup_db`, then `$env:TODAY="2026-11-03"; python -m uvicorn api.main:app --reload --port 8000`. Interactive docs: http://localhost:8000/docs.
 
 The original spec PDF ("GearShare Mini: Python, DSA, SQL and React Project")
 was **deleted by the user**. Everything still needed from it for Phase 4 is
@@ -493,7 +613,7 @@ There are no failing tests. All 208 pass. These are the things a new session mus
 | # | Issue | Impact / what to do |
 |---|---|---|
 | 1 | **Laptop security rule:** `python file.py` can't read `.sql` files (`PermissionError: [Errno 13]`), even outside OneDrive; `python -m ...` and `python -c` can. | Run SQL scripts as modules and tests with `python -m pytest`. Don't make `main.py` or the API read `.sql`. (D22) |
-| 2 | **SQLite `check_same_thread`** | Must be handled for FastAPI (section 5.3, item 2). **Pending.** |
+| 2 | **SQLite `check_same_thread`** | ✅ **Solved in 4.0:** every endpoint is `async def` (D29). Keep it that way. A plain `def` endpoint would run in a thread pool and break. |
 | 3 | **Write-through cache:** two processes on one database don't see each other's changes | Don't run the console and the API together (section 5.3, item 5). Documented in D26. |
 | 4 | **Piping input in PowerShell** (`"3`n..." \| python main.py`) adds a BOM, so the first menu choice is "invalid" | Only affects piped testing, not real typing. Use the bash pipe or the transcript tests. |
 | 5 | **pip / npm network is flaky** on this laptop (DNS `getaddrinfo failed` at times) | Retry, open a fresh terminal, or use `.\.venv\Scripts\python.exe -m pip install ...`. `npm install` may need retrying too. |

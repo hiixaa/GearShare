@@ -343,3 +343,90 @@ Each entry: the problem, the options, what was chosen and why.
 - **Chosen rule:** every query in the program uses `?` placeholders (`storage/`, the tests and the benchmark scripts). The **only** SQL built by string formatting is `search_unsafe()` in `sql/injection_demo.py`, a throwaway file that nothing imports. A test checks that no `execute()` / `query()` in `storage/` receives an f-string.
 - **One documented exception, not user input:** `sql/index_report.py` runs `"EXPLAIN QUERY PLAN " + sql`, where `sql` is one of our own 12 queries read from `queries.sql`. `EXPLAIN` wraps a whole statement, so it can't be a `?` value. No user text is ever involved, so there is nothing to inject. (Found by searching the whole project for SQL built from pieces.)
 - **Where the rule doesn't apply:** `?` can stand for a **value** only, not for a table or column name. Where the SQL itself must vary (the test of row counts per table), the full SQL strings are written out as constants, not assembled from pieces.
+
+---
+
+## Phase 4: React + API
+
+### D28. HTTP status for every exception
+
+- **Problem:** every engine exception must become an HTTP status plus `{"error": code, "message": text}`, with the console's exact message.
+- **Rule used (the spec's hint):** 404 = the thing doesn't exist; 409 = it exists, but its state conflicts with the request; 422 = the input itself makes no sense.
+
+| Exception | Status | Why |
+|---|---|---|
+| `InvalidSKUError` | 422 | "123" can never be a SKU: the input is malformed |
+| `CustomerNotFoundError`, `ItemNotFoundError`, `RentalNotFoundError` | 404 | Well-formed, but no such thing |
+| R1, R3, R4, R7, R8, R2/R6 errors, `WaitingListError`, `UndoNotPossibleError` | 409 | Customer and item exist; the shop's current state refuses (fines, limit, no free unit ...) |
+| Duplicate SKU in `POST /gear` | 409, code `R9` | The SKU exists already |
+| Blank name / negative units / unknown `item_type` / missing JSON field | 422, code `ValidationError` | Bad input |
+| `StorageError` | 503 | The request may be fine; the server can't save right now. Retrying later can work. |
+
+- **One place:** a `{class: status}` dict in `api/errors.py`, walked along the exception's class hierarchy, with 409 as the default for rule errors. A new rule error is automatically 409, with no new code.
+- **Same body for FastAPI's own validation errors:** a missing field would normally return `{"detail": [...]}`. A handler turns it into `{"error": "ValidationError", "message": "sku: Field required"}`, so the website handles one error shape only.
+- **Deliberately no `pattern` on `sku`** in the request models. Otherwise `{"sku": "123"}` would be rejected by FastAPI before the engine sees it, and the spec's sample body (`InvalidSKUError`, "SKU must be exactly 10 digits.") would not match. The rule lives in the engine only.
+- All status codes match the spec's samples, so nothing differs from them.
+
+### D29. One engine per API process, all endpoints `async def`
+
+- **Problem:** FastAPI runs plain `def` endpoints in a **thread pool**. A SQLite connection may only be used by the thread that created it, and `GearShare`'s in-memory shop (dicts, deques, the undo stack) is not thread-safe either.
+- **Options:**
+  1. `async def` endpoints: they all run on the single event-loop thread, one at a time.
+  2. `def` endpoints + `check_same_thread=False` + a `threading.Lock` around every engine call.
+  3. A new `GearShare` (load from the database) per request.
+- **Chosen:** Option 1.
+- **Why:**
+  - Every engine call is a few microseconds of Python plus one small SQLite write, so running them one at a time costs nothing noticeable.
+  - It also **serialises** requests: two customers renting the last unit "at the same moment" are handled one after the other. The second gets `409 R7 No units of ... are available.`, and that is **true** (think-about question 2).
+  - Option 2 achieves the same with more code to get wrong.
+  - Option 3 reloads the whole shop on every request, which is O(rentals).
+- **Engine lifetime:** created once in FastAPI's `lifespan` (open storage → `GearShare(storage)` → `load_data()`), closed on shutdown. `create_app(db_path, today)` lets tests inject a fresh temporary database and a fixed date.
+- **Limit:** one API process only. Several worker processes would each hold their own in-memory copy (D26).
+
+### D30. Extra endpoints the screens need, and CORS
+
+- **Problem:** the spec lists sample requests, but the website also needs a customer picker, a "Join waiting list" button, the staff "Add item" form and a category filter.
+- **Added:**
+  - `GET /customers` (picker + basket limit)
+  - `POST /waiting-list` (returns the console's "... is #1 on the waiting list ..." text)
+  - `POST /gear` (add item)
+  - `GET /categories` (filter options)
+  - `GET /gear/{sku}` also returns `price` and `top_category` for the details page.
+  - `GET /gear` keeps **exactly** the 8 fields of the spec's sample.
+- **Each one only calls an existing `GearShare` method.** No rule is copied into the API (e.g. the duplicate-SKU check is `GearShare.add_item`'s).
+- **Category filter:** `category=Photography` matches items whose category **or** top-level category is Photography, so it returns the Canon and the Sony lens.
+- **CORS:** only `http://localhost:5173` (Vite's dev server), overridable with `GEARSHARE_WEB_ORIGIN`. Only `GET`/`POST` and the `Content-Type` header are allowed. A test checks that another origin gets no `Access-Control-Allow-Origin` header. `*` was rejected: any website could then call the API from a visitor's browser.
+
+### D31. Tailwind, not Material UI
+
+- **Problem:** the spec asks to pick Tailwind or Material UI and use it consistently.
+- **Options:**
+  1. **MUI:** ready-made components (`Card`, `Select`, `Snackbar`) with accessibility built in, but a large dependency with its own styling system to learn.
+  2. **Tailwind:** utility classes on plain HTML elements.
+- **Chosen:** Tailwind (v4, through the `@tailwindcss/vite` plugin).
+- **Why:**
+  - The screens are simple (cards, a form, a table), and Tailwind keeps them as plain `<button>`, `<label>`, `<select>` and `<table>`, which are accessible and keyboard-usable by default. Explaining the code means explaining real HTML, not a component library's API.
+  - Responsiveness is visible in the markup: `grid-cols-1 sm:grid-cols-2 lg:grid-cols-3` is exactly "one column at 360 px".
+  - The whole stylesheet compiles to about 14 kB, because only the classes used are generated.
+- **Cost:** no ready-made components. Focus outlines, the spinner and toasts are written by hand (a few lines each).
+
+### D32. The search lives in the URL, not in `useState`
+
+- **Problem:** "A 'Back to results' link must restore the previous search. Where must the search text live for that to work?"
+- **Options:**
+  1. `useState` in `CataloguePage`: lost the moment the page unmounts (opening `/gear/:sku`).
+  2. Context or a global store: survives navigation, but not a reload or a shared link, and is one more thing to keep in sync.
+  3. **The URL query string** (`/?q=drone&category=Drones&sort=name`) via `useSearchParams`.
+- **Chosen:** Option 3.
+- **Why:**
+  - The URL already survives navigation, reloads, the browser's Back button and bookmarks.
+  - The card's link passes `location.search` along as `state.from`, so the details page's "Back to results" link goes to `/?q=drone`, and the catalogue rebuilds itself from it.
+  - Typing uses `{ replace: true }`, so each letter doesn't add a history entry.
+- **Fetching follows from it:** the fetch path is built from the debounced URL values (300 ms). `useApi(path)` aborts the previous request in its effect cleanup whenever `path` changes, so a slow old response can never overwrite a newer one (the Slow 3G check).
+
+### D33. Phase 4 think-about questions
+
+1. **The basket limit exists in React and in Python. Why each, and which must never be removed?** React's check is for the customer: instant feedback ("Basket full: ...") without a round-trip. Python's R3 check is the **rule**: anyone can send `POST /rentals` without our website (curl, a modified page), and the React basket doesn't even know about rentals already open. The Python check must never be removed. The React one is a convenience.
+2. **Two customers rent the last unit at the same moment. What does the second see, and is it true?** The API serves one request at a time (D29), and every rent is one database transaction (`BEGIN IMMEDIATE`, D26). The first gets `201`, and the second gets `409 R7 No units of '...' are available.`. That's true at the moment the server answered. The second customer's page may still have shown "1 available" from an older fetch, which is why the **server has the last word** and its message is shown exactly.
+3. **Which component would suffer most from prop drilling without context?** `GearActions` (the Add to basket / Join waiting list button). It needs the current customer and the basket, but sits under `Layout` → `CataloguePage` → `GearList` → `GearCard`, none of which use either. `CustomerContext` and `BasketContext` let it read them directly.
+4. **What does each screen say when the API is down?** Every fetching screen shows `Can't reach the rental server.` with a **Retry** button, in plain words with no status code. The customer picker shows "(unavailable)", and checkout or the waiting-list button show the same sentence in red. A non-technical customer understands "can't reach the server, try again".
