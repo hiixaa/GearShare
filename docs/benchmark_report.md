@@ -178,3 +178,45 @@ which is exactly what an index is for.
 searches), plus memory for one set entry per word per item. It pays off for a
 catalogue that is searched far more often than it changes. Every `add_item`
 would also have to update the index. See DECISIONS D12.
+
+---
+
+## 4. Stacks, queues and linked lists (Task 2.4)
+
+### 4.1 `list.pop(0)` vs `deque.popleft()`
+
+Reproduce: `python benchmarks/benchmark_queue.py`. Time to empty a queue of n
+customer IDs from the front (the way the waiting list serves people), median of 5 runs.
+
+| n | list.pop(0) ms | deque.popleft() ms | ratio |
+|---|---|---|---|
+| 10,000 | 4.83 | 0.35 | 14x |
+| 50,000 | 164.81 | 1.46 | 113x |
+| 100,000 | 557.06 | 3.59 | 155x |
+
+**Why (think-about question 3):** a Python `list` is one contiguous array.
+`pop(0)` removes the first slot, then **shifts every remaining element one
+step left**, which is O(n) per pop, so draining the whole queue is O(n²). Doubling
+n from 50k to 100k multiplied the time by about 3.4, heading towards 4×. A
+`deque` is a doubly linked list of fixed-size blocks, with an index for each
+end. `popleft()` just moves the left index (and occasionally frees an empty
+block), which is O(1) per pop and O(n) to drain. Doubling n doubled its time
+(1.46 → 3.59 ms, roughly 2×).
+
+### 4.2 Big-O of the new structures
+
+| Operation | Structure | Time | Space |
+|---|---|---|---|
+| Push / pop undo entry | `deque(maxlen=20)` used as a stack | O(1) | O(20) at most |
+| Undo a rent | + `list.remove` from the rentals history | O(R) | O(1) |
+| Undo a return | lookup in the customer's own rentals | O(k) | O(1) |
+| Join waiting list / serve next | `deque.append` / `popleft` | O(1) | O(w) |
+| Put a served customer back at the front | `deque.appendleft` | O(1) | — |
+| History: insert at head | linked list | O(1) | O(1) per node |
+| History: traverse / delete / reverse / 2nd from end | linked list | O(n) | O(1) |
+
+**Surprise: undoing a rent is O(R), not O(1).** Everything else in undo is a
+dict or set operation, but removing the rental from the full `rentals` history
+list is a scan. It is still fast in practice, because the rental being undone
+is near the end of the list, but `list.remove` searches from the front. A
+dict-based history (as in Phase 3's database, with a primary key) removes it in O(1).

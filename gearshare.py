@@ -6,6 +6,7 @@ calling date.today(), so tests can choose the date.
 
 import csv
 import functools
+from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -20,6 +21,7 @@ from errors import (
     ItemNotRentableError,
     RentalLimitExceededError,
     RentalNotFoundError,
+    UndoNotPossibleError,
     UnpaidFinesError,
     WaitingListError,
 )
@@ -27,6 +29,7 @@ from items import item_from_row, validate_sku
 from rentals import Fine, Rental, parse_date
 
 FINE_LIMIT = 500  # R4: renting is blocked only when unpaid fines are ABOVE this
+UNDO_LIMIT = 20   # how many rent/return actions option 9 can step back through
 
 
 def rupees(amount):
@@ -65,6 +68,21 @@ class ReturnReceipt:
     next_customer: object = None  # Customer notified from the waiting list, or None
 
 
+@dataclass
+class UndoEntry:
+    """Everything needed to reverse one rent or return (Phase 2, D14).
+
+    Stores IDs, not the Rental object: undo looks the rental up again and
+    checks it can still be reversed, because the shop may have changed since.
+    """
+    action: str                       # "rent" or "return"
+    rental_id: str
+    customer_id: str
+    used_reservation: bool = False    # rent: the unit was held for this customer (R7)
+    fine: object = None               # return: the Fine it created, if any
+    served_customer_id: str = None    # return: who moved from the waiting list to a reservation
+
+
 class GearShare:
     def __init__(self):
         # dict by SKU / customer ID: O(1) lookup for every rent/return/search.
@@ -81,11 +99,15 @@ class GearShare:
         # customer ID -> set of SKUs they hold right now.
         # set: R8 is an O(1) "sku in held" test, and len(held) is the R3 count.
         self.held_skus = {}
-        # SKU -> customer IDs waiting, first come first served (R7).
+        # SKU -> deque of customer IDs waiting, first come first served (R7).
+        # deque: popleft() is O(1); list.pop(0) is O(n) (benchmarked in 2.4).
         self.waiting_lists = {}
         # SKU -> customer IDs who were notified a unit is free and may rent it.
         self.reservations = {}
         self.audit_log = []
+        # Stack of UndoEntry: append() pushes, pop() takes the latest (LIFO).
+        # maxlen keeps only the last UNDO_LIMIT actions; the oldest fall off.
+        self.undo_stack = deque(maxlen=UNDO_LIMIT)
 
     # ------------------------------------------------------------------ loading
 
@@ -198,7 +220,11 @@ class GearShare:
 
     def waiting_for(self, sku):
         """Customers still waiting, plus those notified but not yet served."""
-        return self.reservations.get(sku, []) + self.waiting_lists.get(sku, [])
+        return [*self.reservations.get(sku, []), *self.waiting_lists.get(sku, [])]
+
+    def waiting_list(self, sku):
+        """Customers still in the queue for this item, first in line first."""
+        return [self.customers[cid] for cid in self.waiting_lists.get(sku, [])]
 
     # ------------------------------------------------------------------ catalogue
 
@@ -258,6 +284,8 @@ class GearShare:
             due_date=today + timedelta(days=item.rental_days(customer)),
         )
         self._add_rental(rental)  # also takes the unit and records it as held
+        self.undo_stack.append(UndoEntry("rent", rental.rental_id, customer.customer_id,
+                                         used_reservation=has_reservation))
         return rental
 
     # ------------------------------------------------------------------ return
@@ -272,16 +300,22 @@ class GearShare:
         del self.open_rentals[rental.rental_id]
         rental.item.check_in_unit()
         self.held_skus[rental.customer.customer_id].discard(rental.item.sku)
+        fine = None
         if fee > 0:
-            self._add_fine(Fine(rental.rental_id, fee, paid=False))
+            fine = Fine(rental.rental_id, fee, paid=False)
+            self._add_fine(fine)
 
         # R7: the first person waiting is served first.
         next_customer = None
         queue = self.waiting_lists.get(rental.item.sku)
         if queue:
-            next_id = queue.pop(0)
+            next_id = queue.popleft()
             self.reservations.setdefault(rental.item.sku, []).append(next_id)
             next_customer = self.customers[next_id]
+
+        self.undo_stack.append(UndoEntry(
+            "return", rental.rental_id, rental.customer.customer_id, fine=fine,
+            served_customer_id=next_customer.customer_id if next_customer else None))
         return ReturnReceipt(rental, days_late, fee, next_customer)
 
     # ------------------------------------------------------------------ extend
@@ -321,9 +355,83 @@ class GearShare:
         if item.available_units > len(self.reservations.get(item.sku, [])):
             raise WaitingListError(
                 f"'{item.name}' has a unit available. Rent it instead.")
-        queue = self.waiting_lists.setdefault(item.sku, [])
+        queue = self.waiting_lists.setdefault(item.sku, deque())
         queue.append(customer.customer_id)
         return len(queue)
+
+    # ------------------------------------------------------------------ undo
+
+    def undo(self):
+        """Reverse the latest rent or return (menu option 9).
+
+        Returns (action, rental), or None when there is nothing to undo.
+        Raises UndoNotPossibleError if the shop changed so that it can't be
+        reversed any more; that entry is dropped, so the one below it is next.
+        """
+        if not self.undo_stack:
+            return None
+        entry = self.undo_stack.pop()
+        reverse = {"rent": self._undo_rent, "return": self._undo_return}[entry.action]
+        rental = reverse(entry)
+        self.audit_log.append({
+            "time": datetime.now().isoformat(timespec="seconds"),
+            "action": f"undo_{entry.action}",
+            "customer": entry.customer_id,
+            "item": rental.item.sku,
+            "rental_id": rental.rental_id,
+        })
+        return entry.action, rental
+
+    def _undo_rent(self, entry):
+        rental = self.open_rentals.get(entry.rental_id)
+        if rental is None:
+            raise UndoNotPossibleError(
+                f"Cannot undo rental {entry.rental_id}: it has already been returned.")
+        sku = rental.item.sku
+        del self.open_rentals[rental.rental_id]
+        self.rentals.remove(rental)
+        self.rentals_by_customer[entry.customer_id].remove(rental)
+        rental.item.check_in_unit()
+        self.held_skus[entry.customer_id].discard(sku)
+        if entry.used_reservation:   # give the held unit back to the same customer
+            self.reservations.setdefault(sku, []).insert(0, entry.customer_id)
+        Rental.release_id(rental.rental_id)
+        return rental
+
+    def _undo_return(self, entry):
+        rental = next(r for r in self.rentals_by_customer[entry.customer_id]
+                      if r.rental_id == entry.rental_id)
+        item, customer = rental.item, rental.customer
+        reserved = self.reservations.get(item.sku, [])
+        served = entry.served_customer_id
+
+        # Check everything first; change nothing until all checks pass.
+        if served is not None and served not in reserved:
+            raise UndoNotPossibleError(
+                f"Cannot undo the return of {rental.rental_id}: "
+                f"{self.customers[served].name} has already rented the unit.")
+        free = item.available_units - len(reserved) + (1 if served else 0)
+        if free < 1:
+            raise UndoNotPossibleError(
+                f"Cannot undo the return of {rental.rental_id}: "
+                f"the unit has been rented again.")
+        held = self.held_skus[customer.customer_id]
+        if item.sku in held or len(held) >= customer.max_items():
+            raise UndoNotPossibleError(
+                f"Cannot undo the return of {rental.rental_id}: "
+                f"{customer.name} would break R3 or R8.")
+
+        if served is not None:       # back to the FRONT of the queue, not the end
+            reserved.remove(served)
+            self.waiting_lists.setdefault(item.sku, deque()).appendleft(served)
+        if entry.fine is not None:
+            self.fines.remove(entry.fine)
+            self.fines_by_rental[rental.rental_id].remove(entry.fine)
+        rental.return_date = None
+        self.open_rentals[rental.rental_id] = rental
+        item.check_out_unit()
+        held.add(item.sku)
+        return rental
 
     # ------------------------------------------------------------------ reports
 

@@ -22,11 +22,12 @@ Today is 2026-11-03.
 6. Join waiting list
 7. Customer rentals
 8. Overdue report
+9. Undo
 0. Exit
 > abc
-Please enter a number from 0 to 8.
+Please enter a number from 0 to 9.
 >
-Please enter a number from 0 to 8.
+Please enter a number from 0 to 9.
 > 0
 
 # catalogue
@@ -162,6 +163,17 @@ RN001   Vikram Shah  DJI Mini Drone  2026-10-29     5  ₹500
 RN002   Rohan Das    Canon EOS 200D  2026-10-31     3  ₹150
 Total overdue: 2   Fines so far: ₹650
 > 0
+
+# undo
+> 3
+Customer ID: C001
+SKU: 1000000002
+OK: Ananya Nair rented 'Sony 50mm Lens'. Due 2026-11-06.
+> 9
+OK: Undid rental of 'Sony 50mm Lens' by Ananya Nair (rental RN011 removed).
+> 9
+Nothing to undo.
+> 0
 """
 
 
@@ -233,7 +245,7 @@ def test_bad_input_never_crashes(shop, today, capsys):
     out = output_lines(capsys)
     assert out.count("Nothing entered.") == 3
     assert "ERROR [RentalNotFoundError]: No open rental with ID NONSENSE." in out
-    assert out.count("Please enter a number from 0 to 8.") == 2
+    assert out.count("Please enter a number from 0 to 9.") == 2
 
 
 def test_end_of_input_exits_cleanly(capsys):

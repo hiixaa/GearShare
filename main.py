@@ -46,6 +46,12 @@ def format_table(rows, headers=None, right_align=()):
     return "\n".join(lines)
 
 
+def format_waiting_list(shop, sku):
+    """'Waiting list for 'DJI Mini Drone': Meera Joshi, Pooja Menon'."""
+    names = ", ".join(c.name for c in shop.waiting_list(sku)) or "(empty)"
+    return f"Waiting list for '{shop.get_item(sku).name}': {names}"
+
+
 def today_from_env(env):
     """TODAY from the environment (YYYY-MM-DD), or the real date."""
     text = env.get("TODAY", "").strip()
@@ -69,6 +75,7 @@ class Console:
             "6": ("Join waiting list", self.join_waiting_list),
             "7": ("Customer rentals", self.customer_rentals),
             "8": ("Overdue report", self.overdue_report),
+            "9": ("Undo", self.undo),
         }
 
     def ask(self, prompt):
@@ -154,6 +161,19 @@ class Console:
     def join_waiting_list(self):
         customer = self.shop.get_customer(self.ask("Customer ID: "))
         self._join(customer.customer_id, self.ask("SKU: "))
+
+    def undo(self):
+        result = self.shop.undo()
+        if result is None:
+            print("Nothing to undo.")
+            return
+        action, rental = result
+        if action == "rent":
+            print(f"OK: Undid rental of '{rental.item.name}' by {rental.customer.name} "
+                  f"(rental {rental.rental_id} removed).")
+        else:
+            print(f"OK: Undid return of '{rental.item.name}' by {rental.customer.name} "
+                  f"(rental {rental.rental_id} is open again).")
 
     def _join(self, customer_id, sku):
         position = self.shop.join_waiting_list(customer_id, sku)

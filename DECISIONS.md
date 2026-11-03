@@ -141,3 +141,30 @@ Each entry: the problem, the options, what was chosen and why.
 - **Options:** a `set` of weights (answers yes/no only), or a `dict` weight → item.
 - **Chosen:** `dict` weight → **first** item seen with that weight (`setdefault`).
 - **Why:** the answer must name both items, so a set isn't enough. Checking `needed in seen` **before** adding the current item means an item can never pair with itself ("two different items"). Display items are skipped before anything is stored (R1). The result is O(n) time and O(n) space, instead of O(n²) time for trying every pair.
+
+### D14. What an undo entry stores
+
+- **Problem:** option 9 must truly reverse the latest rent or return. Pushing the `Rental` object isn't enough. A return also **created a fine** and may have **moved someone off the waiting list**, and by the time undo runs, the rental might have changed (returned, unit rented again).
+- **Options:**
+  1. Push the `Rental` object and reverse whatever it looks like now.
+  2. Push a snapshot (deep copy) of the whole shop.
+  3. Push a small `UndoEntry` with the action and IDs, plus the exact side effects: `used_reservation` (rent), the `Fine` created and `served_customer_id` (return).
+- **Chosen:** Option 3.
+- **Why:** option 1 can't undo the side effects, and it acts on an object that may no longer be in the state it was pushed in. Option 2 is O(whole shop) memory per action. With option 3, undo looks everything up again by ID, **checks first** (is the unit still free? did the served customer already rent it? would the customer break R3/R8?) and only then changes state. If a check fails, it raises `UndoNotPossibleError` instead of corrupting data. A served customer goes back to the **front** of the queue (`appendleft`), not the end, so undo never costs anyone their place.
+- **Details:**
+  - The stack is a `deque(maxlen=20)`, used only with `append`/`pop` (LIFO), so it can't grow forever in a long session.
+  - Undoing the latest rent hands its ID out again (`Rental.release_id`), so undo + rent gives RN011 both times, without a gap.
+  - Undo is recorded in the audit log as `undo_rent` / `undo_return`.
+
+### D15. Waiting list as a `deque`
+
+- **Problem:** the waiting list removes from the front (serve the first person, R7) and adds at the back.
+- **Options:** `list` with `pop(0)`, `queue.Queue`, or `collections.deque`.
+- **Chosen:** `collections.deque`.
+- **Why:** measured at 100,000 entries, draining with `deque.popleft()` took 3.6 ms vs 557 ms with `list.pop(0)` (155×). `queue.Queue` is built for passing work between threads (with locks), which we don't need. A deque also gives O(1) `appendleft`, which undo needs.
+
+### D16. Phase 1 menu sample changes with option 9
+
+- **Problem:** the spec says the menu "gains option 9 (undo)", but the Phase 1 start-up sample shows the menu ending at 8, with "Please enter a number from 0 to 8."
+- **Chosen:** the menu now lists `9. Undo`, and the error says "0 to 9". The highest number is computed from the options dict, not hard-coded. The start-up transcript test was updated for exactly these two lines. Every other Phase 1 sample is unchanged and still passes.
+- **Why:** the Phase 2 spec explicitly extends the menu, and a prompt saying "0 to 8" while 9 works would be a bug.

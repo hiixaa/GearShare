@@ -46,6 +46,10 @@ class RentalNotFoundError(GearShareError):
     """No rental has this ID (used by return / extend)."""
 
 
+class UndoNotPossibleError(GearShareError):
+    """Phase 2: the latest action can't be reversed any more (state changed since)."""
+
+
 # --- Rule violations (reported by rule number) ------------------------------
 
 class ItemNotRentableError(GearShareError):
