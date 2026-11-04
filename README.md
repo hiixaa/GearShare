@@ -36,11 +36,6 @@ python -m sql.setup_db              # creates data/gearshare.db with the starter
 You can run `python -m sql.setup_db` again at any time to reset the shop to
 the starter data.
 
-> **Note:** run the SQL scripts as modules (`python -m sql.setup_db`, not
-> `python sql/setup_db.py`) and the tests with `python -m pytest`. On my laptop a
-> security rule stops a plain `python file.py` from opening `.sql` files.
-> DECISIONS.md (D22) has the details.
-
 ## Running the console
 
 All the samples in the spec use **2026-11-03** as today's date. You set it with
